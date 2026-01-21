@@ -6,7 +6,6 @@ build:
 
 startCommand:
   type: "stdio" 
-  #"streamable-http"
   command: "python"
   args: ["server.py"]
 
