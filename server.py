@@ -661,4 +661,5 @@ if __name__ == "__main__":
     # Run with streamable-http transport for Smithery deployment
     # Default host 0.0.0.0 allows external connections (required for containers)
     # Default port 8000 is standard for MCP streamable-http
-    mcp.run()
+    print("🚀 NaraMcp Server starting via stdio...", file=sys.stderr)
+    mcp.run(transport="stdio")

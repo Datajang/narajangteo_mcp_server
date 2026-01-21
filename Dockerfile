@@ -4,6 +4,10 @@ FROM python:3.11-slim
 # [중요] Python 출력 버퍼링 해제 (MCP 서버 통신 필수 설정)
 ENV PYTHONUNBUFFERED=1
 
+# [중요] 한글/UTF-8 강제 설정 (이게 없으면 한글 코드를 읽다 죽을 수 있음)
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
 # 작업 디렉토리 설정
 WORKDIR /app
 
