@@ -18,14 +18,10 @@ if sys.platform == 'win32':
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(encoding='utf-8')
 
-import asyncio
 from datetime import datetime, timedelta
-from typing import Any
 
 import httpx
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.server.fastmcp import FastMCP
 
 from file_extractor import extract_text_from_url
 
@@ -524,143 +520,130 @@ async def analyze_bid_detail(file_url: str, filename: str, department_profile: s
         return f"❌ Failed to analyze bid document: {str(e)}\n\nManual link: {file_url}"
 
 
-# Create MCP server instance
-app = Server("nara-mcp-server")
+# Create FastMCP server instance with JSON response for HTTP transport
+mcp = FastMCP(
+    name="nara-mcp-server",
+    description=(
+        "MCP server for searching Korean government procurement bids (나라장터 입찰공고). "
+        "Search service-type bids, get personalized recommendations, and analyze RFP attachments."
+    ),
+    json_response=True
+)
 
 
-@app.list_tools()
-async def list_tools() -> list[Tool]:
-    """List available MCP tools."""
-    return [
-        Tool(
-            name="get_bids_by_keyword",
-            description=(
-                "Search Korean government procurement notices (나라장터) for the last 30 days. "
-                "Returns BOTH regular bid notices (입찰공고) AND preliminary specifications (사전규격) "
-                "for service-type (용역) projects including consulting, development, and SI."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "keyword": {
-                        "type": "string",
-                        "description": (
-                            "Search keyword for bid title (공고명). "
-                            "Examples: '인공지능', 'AI', '플랫폼', '시스템 구축', etc."
-                        )
-                    }
-                },
-                "required": ["keyword"]
-            }
-        ),
-        Tool(
-            name="recommend_bids_for_dept",
-            description=(
-                "Search government procurement notices with department context for personalized recommendations. "
-                "Returns up to 60 results (30 regular bids + 30 pre-specs) with analysis instructions. "
-                "LLM can flexibly present Top N items or all relevant items based on user's request. "
-                "Prioritizes items with non-zero budgets."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "keyword": {
-                        "type": "string",
-                        "description": "Search keyword (e.g., 'AI', 'Cloud', '플랫폼')"
-                    },
-                    "department_profile": {
-                        "type": "string",
-                        "description": (
-                            "Description of your team/department. "
-                            "Examples: 'UI/UX 디자인팀', 'Database Migration Unit', "
-                            "'AI/ML 개발팀', '클라우드 인프라팀'"
-                        )
-                    }
-                },
-                "required": ["keyword", "department_profile"]
-            }
-        ),
-        Tool(
-            name="analyze_bid_detail",
-            description=(
-                "Download and extract text from bid attachment (RFP/제안요청서) for "
-                "strategic analysis. Supports HWP, HWPX, PDF, DOCX, XLSX, and ZIP files. "
-                "ZIP files are processed with priority: 제안요청서 > 과업지시서 > .hwp > .pdf"
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "file_url": {
-                        "type": "string",
-                        "description": "Attachment URL (ntceSpecDocUrl1 from search results)"
-                    },
-                    "filename": {
-                        "type": "string",
-                        "description": "Filename (ntceSpecFileNm1 from search results)"
-                    },
-                    "department_profile": {
-                        "type": "string",
-                        "description": (
-                            "Optional: Your team description for strategic analysis. "
-                            "If provided, response includes analysis prompts for Fit Score, "
-                            "Core Tasks, Winning Strategy, and Risk Factors."
-                        )
-                    }
-                },
-                "required": ["file_url", "filename"]
-            }
-        )
-    ]
+@mcp.tool()
+async def get_bids_by_keyword(keyword: str) -> str:
+    """
+    Search Korean government procurement notices (나라장터) for the last 30 days.
+    Returns BOTH regular bid notices (입찰공고) AND preliminary specifications (사전규격)
+    for service-type (용역) projects including consulting, development, and SI.
+
+    Args:
+        keyword: Search keyword for bid title (공고명).
+                 Examples: '인공지능', 'AI', '플랫폼', '시스템 구축', etc.
+
+    Returns:
+        Formatted string with bid information
+    """
+    if not keyword:
+        return "❌ Error: 'keyword' parameter is required"
+
+    return await search_bids_by_keyword(keyword)
 
 
-@app.call_tool()
-async def call_tool(name: str, arguments: Any) -> list[TextContent]:
-    """Handle tool execution."""
-    if name == "get_bids_by_keyword":
-        keyword = arguments.get("keyword")
-        if not keyword:
-            return [TextContent(type="text", text="❌ Error: 'keyword' parameter is required")]
+@mcp.tool()
+async def recommend_bids_for_dept(keyword: str, department_profile: str) -> str:
+    """
+    Search government procurement notices with department context for personalized recommendations.
+    Returns up to 60 results (30 regular bids + 30 pre-specs) with analysis instructions.
+    LLM can flexibly present Top N items or all relevant items based on user's request.
+    Prioritizes items with non-zero budgets.
 
-        result = await search_bids_by_keyword(keyword)
-        return [TextContent(type="text", text=result)]
+    Args:
+        keyword: Search keyword (e.g., 'AI', 'Cloud', '플랫폼')
+        department_profile: Description of your team/department.
+                           Examples: 'UI/UX 디자인팀', 'Database Migration Unit',
+                                    'AI/ML 개발팀', '클라우드 인프라팀'
 
-    elif name == "recommend_bids_for_dept":
-        keyword = arguments.get("keyword")
-        department_profile = arguments.get("department_profile")
+    Returns:
+        Formatted recommendations with strategic analysis
+    """
+    if not keyword:
+        return "❌ Error: 'keyword' parameter is required"
+    if not department_profile:
+        return "❌ Error: 'department_profile' parameter is required"
 
-        if not keyword:
-            return [TextContent(type="text", text="❌ Error: 'keyword' parameter is required")]
-        if not department_profile:
-            return [TextContent(type="text", text="❌ Error: 'department_profile' parameter is required")]
-
-        result = await search_bids_for_dept(keyword, department_profile)
-        return [TextContent(type="text", text=result)]
-
-    elif name == "analyze_bid_detail":
-        file_url = arguments.get("file_url")
-        filename = arguments.get("filename")
-        department_profile = arguments.get("department_profile", "")
-
-        if not file_url:
-            return [TextContent(type="text", text="❌ Error: 'file_url' parameter is required")]
-        if not filename:
-            return [TextContent(type="text", text="❌ Error: 'filename' parameter is required")]
-
-        result = await analyze_bid_detail(file_url, filename, department_profile)
-        return [TextContent(type="text", text=result)]
-
-    return [TextContent(type="text", text=f"❌ Unknown tool: {name}")]
+    return await search_bids_for_dept(keyword, department_profile)
 
 
-async def main():
-    """Run the MCP server."""
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(
-            read_stream,
-            write_stream,
-            app.create_initialization_options()
-        )
+@mcp.tool()
+async def analyze_bid_detail(file_url: str, filename: str, department_profile: str = "") -> str:
+    """
+    Download and extract text from bid attachment (RFP/제안요청서) for strategic analysis.
+    Supports HWP, HWPX, PDF, DOCX, XLSX, and ZIP files.
+    ZIP files are processed with priority: 제안요청서 > 과업지시서 > .hwp > .pdf
+
+    Args:
+        file_url: Attachment URL (ntceSpecDocUrl1 from search results)
+        filename: Filename (ntceSpecFileNm1 from search results)
+        department_profile: Optional - Your team description for strategic analysis.
+                           If provided, response includes analysis prompts for Fit Score,
+                           Core Tasks, Winning Strategy, and Risk Factors.
+
+    Returns:
+        Extracted document text with optional analysis prompts
+    """
+    if not file_url:
+        return "❌ Error: 'file_url' parameter is required"
+    if not filename:
+        return "❌ Error: 'filename' parameter is required"
+
+    # file_url and filename parameters
+    results = []
+
+    try:
+        # Extract text from the file
+        extracted_text = await extract_text_from_url(file_url, filename)
+
+        # Add header
+        results.extend([
+            f"# 📄 Bid Document Analysis",
+            f"",
+            f"**File:** {filename}",
+            f"**Source:** {file_url}",
+            f""
+        ])
+
+        # Add strategic analysis prompt if department_profile is provided
+        if department_profile:
+            results.extend([
+                f"📋 **Department Profile:** {department_profile}",
+                f"",
+                f"=" * 80,
+                f"",
+                f"**Instructions for Strategic Analysis:**",
+                f"Based on the extracted text below, analyze this project from the perspective of '{department_profile}':",
+                f"1. **Fit Score (0-100):** How well does this project match the team's skills?",
+                f"2. **Core Tasks:** List only tasks that this team would perform",
+                f"3. **Winning Strategy:** Suggest 3 specific approaches to appeal to the client",
+                f"4. **Risk Factors:** Identify risky clauses (tech stack, timeline, penalties)",
+                f"",
+                f"=" * 80,
+            ])
+
+        results.extend([
+            f"",
+            f"## Extracted Document Content:",
+            f"",
+            extracted_text
+        ])
+
+        return "\n".join(results)
+
+    except Exception as e:
+        return f"❌ Failed to analyze bid document: {str(e)}\n\nManual link: {file_url}"
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Run with streamable-http transport for Smithery deployment
+    mcp.run(transport="streamable-http")

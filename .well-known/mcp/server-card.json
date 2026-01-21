@@ -1,0 +1,84 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json",
+  "version": "1.0",
+  "protocolVersion": "2025-06-18",
+  "serverInfo": {
+    "name": "nara-mcp-server",
+    "title": "Nara MCP Server",
+    "version": "1.1.0"
+  },
+  "description": "MCP server for searching Korean government procurement bids (나라장터 입찰공고). Search service-type bids, get personalized recommendations, and analyze RFP attachments.",
+  "documentationUrl": "https://github.com/Datajang/narajangteo_mcp_server#readme",
+  "transport": {
+    "type": "streamable-http"
+  },
+  "capabilities": {
+    "tools": {}
+  },
+  "requires": {
+    "environmentVariables": ["NARA_API_KEY"]
+  },
+  "tools": [
+    {
+      "name": "get_bids_by_keyword",
+      "description": "Search Korean government procurement notices (나라장터) for the last 30 days. Returns BOTH regular bid notices (입찰공고) AND preliminary specifications (사전규격) for service-type (용역) projects including consulting, development, and SI.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "Search keyword for bid title (공고명). Examples: '인공지능', 'AI', '플랫폼', '시스템 구축', etc."
+          }
+        },
+        "required": ["keyword"]
+      }
+    },
+    {
+      "name": "recommend_bids_for_dept",
+      "description": "Search government procurement notices with department context for personalized recommendations. Returns up to 60 results (30 regular bids + 30 pre-specs) with analysis instructions. LLM can flexibly present Top N items or all relevant items based on user's request. Prioritizes items with non-zero budgets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "Search keyword (e.g., 'AI', 'Cloud', '플랫폼')"
+          },
+          "department_profile": {
+            "type": "string",
+            "description": "Description of your team/department. Examples: 'UI/UX 디자인팀', 'Database Migration Unit', 'AI/ML 개발팀', '클라우드 인프라팀'"
+          }
+        },
+        "required": ["keyword", "department_profile"]
+      }
+    },
+    {
+      "name": "analyze_bid_detail",
+      "description": "Download and extract text from bid attachment (RFP/제안요청서) for strategic analysis. Supports HWP, HWPX, PDF, DOCX, XLSX, and ZIP files. ZIP files are processed with priority: 제안요청서 > 과업지시서 > .hwp > .pdf",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_url": {
+            "type": "string",
+            "description": "Attachment URL (ntceSpecDocUrl1 from search results)"
+          },
+          "filename": {
+            "type": "string",
+            "description": "Filename (ntceSpecFileNm1 from search results)"
+          },
+          "department_profile": {
+            "type": "string",
+            "description": "Optional: Your team description for strategic analysis. If provided, response includes analysis prompts for Fit Score, Core Tasks, Winning Strategy, and Risk Factors."
+          }
+        },
+        "required": ["file_url", "filename"]
+      }
+    }
+  ],
+  "instructions": "This server requires a NARA_API_KEY environment variable. Get your API key from https://www.data.go.kr/ by searching for '나라장터 입찰정보' and registering for the BidPublicInfoService.",
+  "_meta": {
+    "license": "MIT",
+    "repository": "https://github.com/Datajang/narajangteo_mcp_server",
+    "author": "Datajang",
+    "keywords": ["government", "procurement", "bid", "g2b", "korea", "나라장터"]
+  }
+}

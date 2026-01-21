@@ -1,5 +1,11 @@
+runtime: "container"
+
+build:
+  dockerfile: "Dockerfile"
+  dockerBuildPath: "."
+
 startCommand:
-  type: stdio
+  type: "streamable-http"
   configSchema:
     type: object
     properties:
@@ -9,11 +15,3 @@ startCommand:
         description: "API key from data.go.kr (공공데이터포털 ServiceKey)"
     required:
       - NARA_API_KEY
-  commandFunction: |
-    (config) => ({
-      command: 'python',
-      args: ['server.py'],
-      env: {
-        NARA_API_KEY: config.NARA_API_KEY
-      }
-    })
