@@ -5,7 +5,11 @@ build:
   dockerBuildPath: "."
 
 startCommand:
-  type: "streamable-http"
+  type: "stdio" 
+  #"streamable-http"
+  command: "python"
+  args: ["server.py"]
+
   configSchema:
     type: object
     properties:

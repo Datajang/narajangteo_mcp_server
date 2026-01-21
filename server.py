@@ -659,4 +659,4 @@ if __name__ == "__main__":
     # Run with streamable-http transport for Smithery deployment
     # Default host 0.0.0.0 allows external connections (required for containers)
     # Default port 8000 is standard for MCP streamable-http
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
+    mcp.run()
