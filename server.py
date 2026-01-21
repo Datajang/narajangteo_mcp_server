@@ -533,15 +533,8 @@ async def analyze_bid_detail(file_url: str, filename: str, department_profile: s
         return f"❌ Failed to analyze bid document: {str(e)}\n\nManual link: {file_url}"
 
 
-# Create FastMCP server instance with JSON response for HTTP transport
-mcp = FastMCP(
-    name="nara-mcp-server",
-    description=(
-        "MCP server for searching Korean government procurement bids (나라장터 입찰공고). "
-        "Search service-type bids, get personalized recommendations, and analyze RFP attachments."
-    ),
-    json_response=True
-)
+# Create FastMCP server instance
+mcp = FastMCP("nara-mcp-server")
 
 
 @mcp.tool()
