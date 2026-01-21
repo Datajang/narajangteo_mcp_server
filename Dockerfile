@@ -11,5 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 애플리케이션 파일 복사
 COPY server.py file_extractor.py ./
 
+# HTTP 포트 노출
+EXPOSE 8000
+
 # MCP 서버 실행
 CMD ["python", "server.py"]

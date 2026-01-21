@@ -26,14 +26,7 @@ from mcp.server.fastmcp import FastMCP
 from file_extractor import extract_text_from_url
 
 # API Configuration
-SERVICE_KEY = os.getenv("NARA_API_KEY")
-if not SERVICE_KEY:
-    raise ValueError(
-        "NARA_API_KEY environment variable is required.\n"
-        "Please set your API key in the MCP client configuration.\n"
-        "Get your API key from: https://www.data.go.kr/\n"
-        "Search for '나라장터 입찰정보' and register for the service."
-    )
+SERVICE_KEY = os.getenv("NARA_API_KEY", "")
 
 BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
 ENDPOINT = "getBidPblancListInfoServcPPSSrch"
@@ -86,6 +79,15 @@ async def search_bids_by_keyword(keyword: str) -> str:
     Returns:
         Formatted string with both bid notices and preliminary specifications
     """
+    # Validate API key
+    if not SERVICE_KEY:
+        return (
+            "❌ Error: NARA_API_KEY environment variable is required.\n"
+            "Please set your API key in the MCP client configuration.\n"
+            "Get your API key from: https://www.data.go.kr/\n"
+            "Search for '나라장터 입찰정보' and register for the service."
+        )
+
     # Ensure keyword is properly encoded as UTF-8
     if isinstance(keyword, bytes):
         keyword = keyword.decode('utf-8', errors='replace')
@@ -276,6 +278,15 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
     Returns:
         60개 결과 + 부서 프로필 컨텍스트 + LLM 지시문
     """
+    # Validate API key
+    if not SERVICE_KEY:
+        return (
+            "❌ Error: NARA_API_KEY environment variable is required.\n"
+            "Please set your API key in the MCP client configuration.\n"
+            "Get your API key from: https://www.data.go.kr/\n"
+            "Search for '나라장터 입찰정보' and register for the service."
+        )
+
     if isinstance(keyword, bytes):
         keyword = keyword.decode('utf-8', errors='replace')
     else:
@@ -646,4 +657,6 @@ async def analyze_bid_detail(file_url: str, filename: str, department_profile: s
 
 if __name__ == "__main__":
     # Run with streamable-http transport for Smithery deployment
-    mcp.run(transport="streamable-http")
+    # Default host 0.0.0.0 allows external connections (required for containers)
+    # Default port 8000 is standard for MCP streamable-http
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
