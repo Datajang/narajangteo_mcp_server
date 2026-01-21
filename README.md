@@ -4,10 +4,11 @@ MCP server for searching Korean government procurement bid notices from G2B (나
 
 ## Features
 
-- 🔍 **키워드 검색**: 최근 7일간 용역 입찰공고를 키워드로 검색
+- 🔍 **통합 검색**: 최근 30일간 용역 입찰공고 + 사전규격을 키워드로 검색
+- 💰 **예산 정보**: 모든 검색 결과에 예산 금액 표시
 - 📅 **자동 필터링**: 마감되지 않은 공고만 자동 필터링
 - 📎 **파일 추출**: 제안요청서(RFP) 자동 다운로드 및 텍스트 추출
-- 🏢 **맞춤형 추천**: 부서 프로필 기반 Top 5 입찰공고 추천
+- 🏢 **맞춤형 추천**: 부서 프로필 기반 유연한 추천 (Top N 또는 전체 목록)
 - 📄 **다형식 지원**: HWP, HWPX, PDF, DOCX, XLSX, ZIP 파일 자동 처리
 - 🎯 **전략 분석**: 첨부파일 기반 입찰 전략 제안
 
@@ -91,17 +92,28 @@ Continue, Cline 등 다른 MCP 클라이언트에서도 동일한 방식으로 �
 
 ### 1. `get_bids_by_keyword`
 
-키워드로 최근 7일간 용역 입찰공고를 검색합니다.
+키워드로 최근 30일간 용역 입찰공고 및 사전규격을 검색합니다.
 
 **파라미터:**
 - `keyword` (필수): 검색 키워드 (예: "인공지능", "AI", "플랫폼", "시스템 구축")
 
 **반환 정보:**
+
+**일반 입찰공고:**
 - 공고명 (bidNtceNm)
 - 공고번호 (bidNtceNo)
 - 수요기관 (dminsttNm)
+- 예산 (bdgtAmt / presmptPrce)
 - 마감일시 (bidClseDt) - 마감되지 않은 공고만
 - 제안요청서 링크 (ntceSpecDocUrl1)
+
+**사전규격:**
+- 사전규격명 (bfSpecNm)
+- 사전규격번호 (bfSpecRgstNo)
+- 발주기관 (ordInsttNm)
+- 배정예산 (asignBdgtAmt)
+- 의견마감일시 (opnEndDt)
+- 제안요청서 링크
 
 **예시 질문:**
 ```
@@ -115,18 +127,23 @@ AI 관련 정부 프로젝트 입찰 공고를 찾아줘
 
 ### 2. `recommend_bids_for_dept`
 
-부서/팀 프로필을 기반으로 맞춤형 입찰공고를 추천합니다 (최대 30개 검색 후 Top 5 선정).
+부서/팀 프로필을 기반으로 맞춤형 입찰공고를 추천합니다 (최대 60개 검색: 일반 입찰 30개 + 사전규격 30개).
 
 **파라미터:**
 - `keyword` (필수): 검색 키워드
 - `department_profile` (필수): 부서/팀 설명 (예: "UI/UX 디자인팀", "AI/ML 개발팀")
 
+**출력 방식:**
+- 사용자가 "Top 5" 또는 특정 개수를 요청하면 해당 개수만큼 추천
+- "모든 관련 공고"를 요청하면 전체 목록을 적합도 순으로 표시
+- 예산이 있는 항목 우선 추천
+
 **예시 질문:**
 ```
-우리 팀은 클라우드 인프라 구축 전문팀이야. "클라우드" 키워드로 우리 팀에 맞는 입찰공고 추천해줘
+우리 팀은 클라우드 인프라 구축 전문팀이야. "클라우드" 키워드로 우리 팀에 맞는 입찰공고 Top 5를 추천해줘
 ```
 ```
-데이터베이스 마이그레이션 전문가인데, "DB" 키워드로 적합한 입찰공고를 찾아줘
+데이터베이스 마이그레이션 전문가인데, "DB" 키워드로 관련된 모든 공고를 보여줘
 ```
 
 ---
@@ -165,14 +182,26 @@ AI 관련 정부 프로젝트 입찰 공고를 찾아줘
 ```
 Q: 나라장터에서 "시스템 개발" 키워드로 입찰공고를 검색해줘
 
-A: 🔍 Found 15 bid notice(s) total, 8 still open for keyword: '시스템 개발'
-   📅 Search period: 20260109 ~ 20260116
+A: 🔍 **일반 입찰 공고 (Regular Bids)**
+   Found 15 bid notice(s) total, 8 still open
+   📅 Search period: 20251221 ~ 20260120
 
    ## 1. AI 기반 고객관리 시스템 개발 용역
       📌 공고번호: 20260112345-00
       🏢 수요기관: 서울시청
+      💰 예산: 150,000,000원
       ⏰ 마감일시: 202601201430
       📎 제안요청서: [다운로드 링크]
+
+   ================================================================================
+   📋 **사전규격 공고 (Preliminary Specifications)**
+   Found 3 pre-spec(s) total, 2 still open
+
+   ## 1. 고객관리 플랫폼 사전규격
+      📌 사전규격번호: PRE20260101-01
+      🏢 발주기관: 경기도청
+      💰 배정예산: 80,000,000원
+      ⏰ 의견마감일시: 202601251700
 ```
 
 ### 맞춤형 추천
@@ -180,17 +209,23 @@ A: 🔍 Found 15 bid notice(s) total, 8 still open for keyword: '시스템 개�
 ```
 Q: 우리 팀은 React 기반 웹 프론트엔드 개발 전문팀이야. "플랫폼 구축" 키워드로 우리 팀에 맞는 입찰공고 Top 5를 추천해줘
 
-A: 🎯 Department-Filtered Bid Search Results
+A: 🎯 Department-Filtered Integrated Search Results
 
    📋 Department Profile: React 기반 웹 프론트엔드 개발 전문팀
    🔍 Keyword: 플랫폼 구축
-   📊 Total Open Bids: 22 (out of 30 total)
+   📊 Results:
+     - Regular Bids: 22 open (out of 30 total)
+     - Pre-Specs: 8 open (out of 30 total)
 
    **Top 5 Recommendations:**
 
-   1. ✅ 시민참여 플랫폼 구축 (적합도 95점)
-      - React/TypeScript 기반 웹 프론트엔드 구축 명시
-      - UI/UX 디자인 역량 중요
+   1. ✅ [BID] 시민참여 플랫폼 구축 (적합도 95점)
+      - 예산: 200,000,000원
+      - 이유: React/TypeScript 기반 웹 프론트엔드 구축 명시, UI/UX 디자인 역량 중요
+
+   2. ✅ [PRESPEC] 공공서비스 웹포털 사전규격 (적합도 90점)
+      - 예산: 150,000,000원
+      - 이유: 반응형 웹 디자인 요구, 사전 의견 제출로 경쟁력 확보 가능
    ...
 ```
 
@@ -237,11 +272,11 @@ A: 📄 Bid Document Analysis
 
 ### 2. API Error (Code: 03 - No Data)
 
-**원인**: 검색 결과가 없거나, 최근 7일간 해당 키워드의 공고가 없습니다.
+**원인**: 검색 결과가 없거나, 최근 30일간 해당 키워드의 공고가 없습니다.
 
 **해결 방법:**
 - 다른 키워드로 검색 시도
-- 검색 기간을 확장하고 싶다면 개발자에게 문의
+- 더 긴 검색 기간이 필요하면 개발자에게 문의
 
 ### 3. API Error (Code: 20 - Access Denied)
 
@@ -263,14 +298,17 @@ A: 📄 Bid Document Analysis
 
 - **데이터 출처**: 조달청 나라장터 (Korea Public Procurement Service)
 - **API 서비스**: BidPublicInfoService
-- **엔드포인트**: `getBidPblancListInfoServcPPSSrch`
+- **엔드포인트**:
+  - 일반 입찰: `getBidPblancListInfoServcPPSSrch`
+  - 사전규격: `getBfSpecRgstSttusListInfoServcPPSSrch`
 - **공고 유형**: 용역 (Service) - 컨설팅, 개발, SI 프로젝트
-- **검색 기간**: 최근 7일 (마감되지 않은 공고 비율 최적화)
+- **검색 기간**: 최근 30일 (마감되지 않은 공고 비율 최적화)
 - **필터링**: 마감일시 기준 자동 필터링
 
 **참고:**
 - 물품 공고: 엔드포인트 변경 필요 (`getBidPblancListInfoThngPPSSrch`)
 - 공사 공고: 엔드포인트 변경 필요 (`getBidPblancListInfoCnstwkPPSSrch`)
+- 사전규격 검색: 별도 엔드포인트 사용, 파라미터명 차이 (`bidNtceNm` vs `bfSpecNm`)
 
 ## Technical Stack
 

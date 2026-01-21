@@ -41,6 +41,7 @@ if not SERVICE_KEY:
 
 BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
 ENDPOINT = "getBidPblancListInfoServcPPSSrch"
+PRESPEC_ENDPOINT = "getBfSpecRgstSttusListInfoServcPPSSrch"
 
 
 def get_date_range_for_last_month() -> tuple[int, int]:
@@ -80,246 +81,388 @@ def is_bid_open(close_datetime_str: str) -> bool:
 
 async def search_bids_by_keyword(keyword: str) -> str:
     """
-    Search for service-type bid notices using a keyword.
+    Search for service-type bid notices AND preliminary specifications.
+    Returns both regular bids and pre-specs in separate sections.
 
     Args:
-        keyword: Search term for bid title (공고명)
+        keyword: Search term for bid title / pre-spec title
 
     Returns:
-        Formatted string with bid information
+        Formatted string with both bid notices and preliminary specifications
     """
     # Ensure keyword is properly encoded as UTF-8
     if isinstance(keyword, bytes):
         keyword = keyword.decode('utf-8', errors='replace')
     else:
-        # Re-encode to ensure proper UTF-8
         keyword = keyword.encode('utf-8', errors='replace').decode('utf-8')
 
     start_date, end_date = get_date_range_for_last_month()
+    start_date_str = str(start_date)[:8]
+    end_date_str = str(end_date)[:8]
 
-    params = {
-        "ServiceKey": SERVICE_KEY,
-        "type": "json",
-        "inqryDiv": "1",  # Posted date
-        "inqryBgnDt": start_date,
-        "inqryEndDt": end_date,
-        "bidNtceNm": keyword,
-        "numOfRows": "20",
-        "pageNo": "1"
-    }
-
-    # Properly encode Korean characters in URL
-    url = f"{BASE_URL}/{ENDPOINT}"
-
-    # Debug: Log request details
-    import sys
-    print(f"🔍 DEBUG - Keyword received: '{keyword}'", file=sys.stderr)
-    print(f"🔍 DEBUG - Keyword bytes: {keyword.encode('utf-8')}", file=sys.stderr)
-    print(f"🔍 DEBUG - Request URL: {url}", file=sys.stderr)
-    print(f"🔍 DEBUG - Params: {params}", file=sys.stderr)
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
-
-        # Debug: Log raw response
-        print(f"🔍 DEBUG - Response: {data}", file=sys.stderr)
-
-        # Check API response status
-        header = data.get("response", {}).get("header", {})
-        result_code = header.get("resultCode")
-        result_msg = header.get("resultMsg", "")
-
-        if result_code != "00":
-            return f"❌ API Error: {result_msg} (Code: {result_code})"
-
-        # Extract items
-        body = data.get("response", {}).get("body", {})
-        items = body.get("items")
-
-        # Handle different response structures
-        if not items:
-            return f"📭 No bid notices found for keyword: '{keyword}' in the last 30 days."
-
-        # items can be a list, dict with "item" key, or empty string ""
-        if isinstance(items, str):
-            return f"📭 No bid notices found for keyword: '{keyword}' in the last 30 days."
-
-        # Case 1: items is already a list of bid objects
-        if isinstance(items, list):
-            item_list = items
-        # Case 2: items is a dict with "item" key
-        elif isinstance(items, dict):
-            if not items.get("item"):
-                return f"📭 No bid notices found for keyword: '{keyword}' in the last 30 days."
-            item_list = items.get("item", [])
-            # If single item, convert to list
-            if isinstance(item_list, dict):
-                item_list = [item_list]
-        else:
-            return f"📭 No bid notices found for keyword: '{keyword}' in the last 30 days."
-
-        if not item_list:
-            return f"📭 No bid notices found for keyword: '{keyword}' in the last 30 days."
-
-        # 마감되지 않은 공고만 필터링
-        open_bids = [item for item in item_list if is_bid_open(item.get("bidClseDt", ""))]
-
-        if not open_bids:
-            return f"📭 No open bid notices found for keyword: '{keyword}' (all bids are closed)"
-
-        # Format results
-        total_count = body.get("totalCount", len(item_list))
-        results = [f"🔍 Found {total_count} bid notice(s) total, {len(open_bids)} still open for keyword: '{keyword}'\n"]
-        # Convert int dates to string and extract YYYYMMDD
-        start_date_str = str(start_date)[:8]
-        end_date_str = str(end_date)[:8]
-        results.append(f"📅 Search period: {start_date_str} ~ {end_date_str}\n")
-        results.append("=" * 80 + "\n")
-
-        for idx, item in enumerate(open_bids, 1):
-            bid_name = item.get("bidNtceNm", "N/A")
-            bid_no = item.get("bidNtceNo", "N/A")
-            deadline = item.get("bidClseDt", "N/A")
-            spec_url = item.get("ntceSpecDocUrl1", "")
-            demand_org = item.get("dminsttNm", "N/A")
-
-            results.append(f"\n## {idx}. {bid_name}\n")
-            results.append(f"   📌 공고번호: {bid_no}\n")
-            results.append(f"   🏢 수요기관: {demand_org}\n")
-            results.append(f"   ⏰ 마감일시: {deadline}\n")
-
-            if spec_url:
-                results.append(f"   📎 제안요청서: {spec_url}\n")
-            else:
-                results.append(f"   📎 제안요청서: 없음\n")
-
-            results.append("\n" + "-" * 80 + "\n")
-
-        return "".join(results)
-
-    except httpx.HTTPError as e:
-        return f"❌ HTTP Error: {str(e)}"
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
-
-
-async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
-    """
-    부서 맞춤형 입찰공고 검색 (§7)
-    30개 결과를 가져와서 부서 프로필과 함께 반환
-    LLM 클라이언트가 Top 5 선정
-
-    Args:
-        keyword: 검색 키워드
-        department_profile: 부서/팀 설명
-
-    Returns:
-        30개 결과 + 부서 프로필 컨텍스트
-    """
-    if isinstance(keyword, bytes):
-        keyword = keyword.decode('utf-8', errors='replace')
-    else:
-        keyword = keyword.encode('utf-8', errors='replace').decode('utf-8')
-
-    start_date, end_date = get_date_range_for_last_month()
-
-    params = {
+    # ========== SECTION 1: Regular Bid Notices ==========
+    bid_params = {
         "ServiceKey": SERVICE_KEY,
         "type": "json",
         "inqryDiv": "1",
         "inqryBgnDt": start_date,
         "inqryEndDt": end_date,
         "bidNtceNm": keyword,
-        "numOfRows": "30",  # 더 많은 결과 가져오기
+        "numOfRows": "20",
         "pageNo": "1"
     }
+    bid_url = f"{BASE_URL}/{ENDPOINT}"
 
-    url = f"{BASE_URL}/{ENDPOINT}"
-
+    open_bids = []
+    bid_total = 0
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
+            bid_response = await client.get(bid_url, params=bid_params)
+            bid_response.raise_for_status()
+            bid_data = bid_response.json()
 
-        header = data.get("response", {}).get("header", {})
-        result_code = header.get("resultCode")
-        result_msg = header.get("resultMsg", "")
+        bid_header = bid_data.get("response", {}).get("header", {})
+        if bid_header.get("resultCode") == "00":
+            bid_body = bid_data.get("response", {}).get("body", {})
+            bid_items = bid_body.get("items")
+            bid_total = bid_body.get("totalCount", 0)
 
-        if result_code != "00":
-            return f"❌ API Error: {result_msg} (Code: {result_code})"
+            if bid_items and not isinstance(bid_items, str):
+                if isinstance(bid_items, list):
+                    item_list = bid_items
+                elif isinstance(bid_items, dict):
+                    item_list = bid_items.get("item", [])
+                    if isinstance(item_list, dict):
+                        item_list = [item_list]
+                else:
+                    item_list = []
 
-        body = data.get("response", {}).get("body", {})
-        items = body.get("items")
+                open_bids = [item for item in item_list if is_bid_open(item.get("bidClseDt", ""))]
+    except Exception:
+        pass  # Continue to pre-spec search even if bid search fails
 
-        if not items or isinstance(items, str):
-            return f"📭 No bid notices found for keyword: '{keyword}'"
+    # ========== SECTION 2: Preliminary Specifications ==========
+    prespec_params = {
+        "ServiceKey": SERVICE_KEY,
+        "type": "json",
+        "inqryDiv": "1",
+        "inqryBgnDt": start_date,
+        "inqryEndDt": end_date,
+        "bfSpecNm": keyword,  # Different parameter name!
+        "numOfRows": "20",
+        "pageNo": "1"
+    }
+    prespec_url = f"{BASE_URL}/{PRESPEC_ENDPOINT}"
 
-        if isinstance(items, list):
-            item_list = items
-        elif isinstance(items, dict):
-            if not items.get("item"):
-                return f"📭 No bid notices found for keyword: '{keyword}'"
-            item_list = items.get("item", [])
-            if isinstance(item_list, dict):
-                item_list = [item_list]
-        else:
-            return f"📭 No bid notices found for keyword: '{keyword}'"
+    open_prespecs = []
+    prespec_total = 0
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            prespec_response = await client.get(prespec_url, params=prespec_params)
+            prespec_response.raise_for_status()
+            prespec_data = prespec_response.json()
 
-        if not item_list:
-            return f"📭 No bid notices found for keyword: '{keyword}'"
+        prespec_header = prespec_data.get("response", {}).get("header", {})
+        if prespec_header.get("resultCode") == "00":
+            prespec_body = prespec_data.get("response", {}).get("body", {})
+            prespec_items = prespec_body.get("items")
+            prespec_total = prespec_body.get("totalCount", 0)
 
-        # 마감되지 않은 공고만 필터링
-        open_bids = [item for item in item_list if is_bid_open(item.get("bidClseDt", ""))]
+            if prespec_items and not isinstance(prespec_items, str):
+                if isinstance(prespec_items, list):
+                    item_list = prespec_items
+                elif isinstance(prespec_items, dict):
+                    item_list = prespec_items.get("item", [])
+                    if isinstance(item_list, dict):
+                        item_list = [item_list]
+                else:
+                    item_list = []
 
-        if not open_bids:
-            return f"📭 No open bid notices found for keyword: '{keyword}' (all bids are closed)"
+                open_prespecs = [item for item in item_list if is_bid_open(item.get("opnEndDt", ""))]
+    except Exception:
+        pass  # Continue even if pre-spec search fails
 
-        # 부서 프로필 컨텍스트와 함께 결과 포맷팅
-        total_count = body.get("totalCount", len(item_list))
-        results = [
-            f"🎯 Department-Filtered Bid Search Results",
-            f"",
-            f"📋 **Department Profile:** {department_profile}",
-            f"🔍 **Keyword:** {keyword}",
-            f"📊 **Total Open Bids:** {len(open_bids)} (out of {total_count} total)",
-            f"",
-            f"=" * 80,
-            f"",
-            f"**Instructions for LLM:** Please analyze the following bids and select the TOP 5 most relevant bids for the department profile above. For each selected bid, provide a one-line reason why it fits the department.",
-            f"",
-            f"=" * 80,
-            f""
-        ]
+    # ========== Check if both searches returned nothing ==========
+    if not open_bids and not open_prespecs:
+        return f"📭 No bid notices or preliminary specifications found for keyword: '{keyword}' in the last 7 days."
 
+    # ========== Format Results ==========
+    results = []
+
+    # Section 1: Regular Bid Notices
+    results.append(f"🔍 **일반 입찰 공고 (Regular Bids)**\n")
+    results.append(f"Found {bid_total} bid notice(s) total, {len(open_bids)} still open\n")
+    results.append(f"📅 Search period: {start_date_str} ~ {end_date_str}\n")
+    results.append("=" * 80 + "\n")
+
+    if open_bids:
         for idx, item in enumerate(open_bids, 1):
             bid_name = item.get("bidNtceNm", "N/A")
             bid_no = item.get("bidNtceNo", "N/A")
             deadline = item.get("bidClseDt", "N/A")
             spec_url = item.get("ntceSpecDocUrl1", "")
-            spec_filename = item.get("ntceSpecFileNm1", "")
             demand_org = item.get("dminsttNm", "N/A")
-            ntce_org = item.get("ntceInsttNm", "N/A")
 
-            results.append(f"### [{idx}] {bid_name}")
-            results.append(f"- 공고번호: {bid_no}")
-            results.append(f"- 수요기관: {demand_org}")
-            results.append(f"- 공고기관: {ntce_org}")
-            results.append(f"- 마감일시: {deadline}")
+            # Budget info
+            bdgt_amt = item.get("bdgtAmt", "0")
+            presmp_prce = item.get("presmptPrce", "0")
+            if bdgt_amt and str(bdgt_amt) != "0":
+                budget = bdgt_amt
+            elif presmp_prce and str(presmp_prce) != "0":
+                budget = presmp_prce
+            else:
+                budget = "0"
+            try:
+                budget_formatted = f"{int(budget):,}원" if budget != "0" else "미공개"
+            except (ValueError, TypeError):
+                budget_formatted = "미공개"
+
+            results.append(f"\n## {idx}. {bid_name}\n")
+            results.append(f"   📌 공고번호: {bid_no}\n")
+            results.append(f"   🏢 수요기관: {demand_org}\n")
+            results.append(f"   💰 예산: {budget_formatted}\n")
+            results.append(f"   ⏰ 마감일시: {deadline}\n")
             if spec_url:
-                results.append(f"- 첨부파일: {spec_filename or 'Available'}")
-                results.append(f"- 첨부URL: {spec_url}")
-            results.append("")
+                results.append(f"   📎 제안요청서: {spec_url}\n")
+            else:
+                results.append(f"   📎 제안요청서: 없음\n")
+            results.append("\n" + "-" * 80 + "\n")
+    else:
+        results.append("No open bid notices found.\n\n")
 
-        return "\n".join(results)
+    # Section 2: Preliminary Specifications
+    results.append("\n" + "=" * 80 + "\n")
+    results.append(f"📋 **사전규격 공고 (Preliminary Specifications)**\n")
+    results.append(f"Found {prespec_total} pre-spec(s) total, {len(open_prespecs)} still open\n")
+    results.append("=" * 80 + "\n")
 
-    except httpx.HTTPError as e:
-        return f"❌ HTTP Error: {str(e)}"
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
+    if open_prespecs:
+        for idx, item in enumerate(open_prespecs, 1):
+            spec_name = item.get("bfSpecNm", "N/A")
+            spec_no = item.get("bfSpecRgstNo", "N/A")
+            deadline = item.get("opnEndDt", "N/A")
+            agency = item.get("ordInsttNm", "N/A")
+            spec_url = item.get("ntceSpecDocUrl1", "")
+
+            # Budget info (pre-spec uses different field)
+            budget_amt = item.get("asignBdgtAmt", "0")
+            try:
+                budget_formatted = f"{int(budget_amt):,}원" if budget_amt and budget_amt != "0" else "미공개"
+            except (ValueError, TypeError):
+                budget_formatted = "미공개"
+
+            results.append(f"\n## {idx}. {spec_name}\n")
+            results.append(f"   📌 사전규격번호: {spec_no}\n")
+            results.append(f"   🏢 발주기관: {agency}\n")
+            results.append(f"   💰 배정예산: {budget_formatted}\n")
+            results.append(f"   ⏰ 의견마감일시: {deadline}\n")
+            if spec_url:
+                results.append(f"   📎 제안요청서: {spec_url}\n")
+            else:
+                results.append(f"   📎 제안요청서: 없음\n")
+            results.append("\n" + "-" * 80 + "\n")
+    else:
+        results.append("No open preliminary specifications found.\n")
+
+    return "".join(results)
+
+
+async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
+    """
+    부서 맞춤형 통합 검색 (일반 입찰 + 사전규격)
+    최대 60개 결과 (입찰 30 + 사전규격 30)를 LLM에게 전달
+    LLM이 사용자 요청에 따라 유연하게 대응 (Top N 또는 전체)
+
+    Args:
+        keyword: 검색 키워드
+        department_profile: 부서/팀 설명
+
+    Returns:
+        60개 결과 + 부서 프로필 컨텍스트 + LLM 지시문
+    """
+    if isinstance(keyword, bytes):
+        keyword = keyword.decode('utf-8', errors='replace')
+    else:
+        keyword = keyword.encode('utf-8', errors='replace').decode('utf-8')
+
+    start_date, end_date = get_date_range_for_last_month()
+
+    # ========== API 1: Regular Bid Notices (30개) ==========
+    bid_params = {
+        "ServiceKey": SERVICE_KEY,
+        "type": "json",
+        "inqryDiv": "1",
+        "inqryBgnDt": start_date,
+        "inqryEndDt": end_date,
+        "bidNtceNm": keyword,
+        "numOfRows": "30",
+        "pageNo": "1"
+    }
+    bid_url = f"{BASE_URL}/{ENDPOINT}"
+
+    open_bids = []
+    bid_total = 0
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            bid_response = await client.get(bid_url, params=bid_params)
+            bid_response.raise_for_status()
+            bid_data = bid_response.json()
+
+        bid_header = bid_data.get("response", {}).get("header", {})
+        if bid_header.get("resultCode") == "00":
+            bid_body = bid_data.get("response", {}).get("body", {})
+            bid_items = bid_body.get("items")
+            bid_total = bid_body.get("totalCount", 0)
+
+            if bid_items and not isinstance(bid_items, str):
+                if isinstance(bid_items, list):
+                    item_list = bid_items
+                elif isinstance(bid_items, dict):
+                    item_list = bid_items.get("item", [])
+                    if isinstance(item_list, dict):
+                        item_list = [item_list]
+                else:
+                    item_list = []
+
+                open_bids = [item for item in item_list if is_bid_open(item.get("bidClseDt", ""))]
+    except Exception:
+        pass
+
+    # ========== API 2: Preliminary Specifications (30개) ==========
+    prespec_params = {
+        "ServiceKey": SERVICE_KEY,
+        "type": "json",
+        "inqryDiv": "1",
+        "inqryBgnDt": start_date,
+        "inqryEndDt": end_date,
+        "bfSpecNm": keyword,
+        "numOfRows": "30",
+        "pageNo": "1"
+    }
+    prespec_url = f"{BASE_URL}/{PRESPEC_ENDPOINT}"
+
+    open_prespecs = []
+    prespec_total = 0
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            prespec_response = await client.get(prespec_url, params=prespec_params)
+            prespec_response.raise_for_status()
+            prespec_data = prespec_response.json()
+
+        prespec_header = prespec_data.get("response", {}).get("header", {})
+        if prespec_header.get("resultCode") == "00":
+            prespec_body = prespec_data.get("response", {}).get("body", {})
+            prespec_items = prespec_body.get("items")
+            prespec_total = prespec_body.get("totalCount", 0)
+
+            if prespec_items and not isinstance(prespec_items, str):
+                if isinstance(prespec_items, list):
+                    item_list = prespec_items
+                elif isinstance(prespec_items, dict):
+                    item_list = prespec_items.get("item", [])
+                    if isinstance(item_list, dict):
+                        item_list = [item_list]
+                else:
+                    item_list = []
+
+                open_prespecs = [item for item in item_list if is_bid_open(item.get("opnEndDt", ""))]
+    except Exception:
+        pass
+
+    if not open_bids and not open_prespecs:
+        return f"📭 No bid notices or preliminary specifications found for keyword: '{keyword}'"
+
+    # ========== Format Results with LLM Instructions ==========
+    results = [
+        f"🎯 Department-Filtered Integrated Search Results",
+        f"",
+        f"📋 **Department Profile:** {department_profile}",
+        f"🔍 **Keyword:** {keyword}",
+        f"📊 **Results:**",
+        f"  - Regular Bids: {len(open_bids)} open (out of {bid_total} total)",
+        f"  - Pre-Specs: {len(open_prespecs)} open (out of {prespec_total} total)",
+        f"",
+        f"=" * 80,
+        f"",
+        f"**Instructions for LLM:**",
+        f"Analyze BOTH regular bids AND preliminary specifications below for relevance to the department profile.",
+        f"**Prioritize items with non-zero budget values.**",
+        f"",
+        f"Based on the user's request:",
+        f"  - If they ask for Top 5 or specific number: Select and present the most relevant items",
+        f"  - If they ask for all relevant items: Present all items sorted by relevance",
+        f"",
+        f"For each item you present, include:",
+        f"  1. Type (Regular Bid or Pre-Spec) - Use the [BID-N] or [PRESPEC-N] prefix from the data",
+        f"  2. Relevance reason (why it fits the department)",
+        f"  3. Budget amount",
+        f"  4. URL (공고 URL or 제안요청서 URL)",
+        f"",
+        f"=" * 80,
+        f""
+    ]
+
+    # Section 1: Regular Bids
+    results.append(f"## Regular Bids ({len(open_bids)} open)\n")
+    for idx, item in enumerate(open_bids, 1):
+        bid_name = item.get("bidNtceNm", "N/A")
+        bid_no = item.get("bidNtceNo", "N/A")
+        deadline = item.get("bidClseDt", "N/A")
+        demand_org = item.get("dminsttNm", "N/A")
+        bid_url = item.get("bidNtceDtlUrl", "")
+        spec_url = item.get("ntceSpecDocUrl1", "")
+
+        # Budget
+        bdgt_amt = item.get("bdgtAmt", "0")
+        presmp_prce = item.get("presmptPrce", "0")
+        if bdgt_amt and str(bdgt_amt) != "0":
+            budget = bdgt_amt
+        elif presmp_prce and str(presmp_prce) != "0":
+            budget = presmp_prce
+        else:
+            budget = "0"
+        try:
+            budget_formatted = f"{int(budget):,}원" if budget != "0" else "미공개"
+        except (ValueError, TypeError):
+            budget_formatted = "미공개"
+
+        results.append(f"### [BID-{idx}] {bid_name}")
+        results.append(f"- 공고번호: {bid_no}")
+        results.append(f"- 수요기관: {demand_org}")
+        results.append(f"- 예산: {budget_formatted}")
+        results.append(f"- 마감일시: {deadline}")
+        if bid_url:
+            results.append(f"- 공고 URL: {bid_url}")
+        if spec_url:
+            results.append(f"- 제안요청서 URL: {spec_url}")
+        results.append("")
+
+    # Section 2: Preliminary Specifications
+    results.append(f"\n## Preliminary Specifications ({len(open_prespecs)} open)\n")
+    for idx, item in enumerate(open_prespecs, 1):
+        spec_name = item.get("bfSpecNm", "N/A")
+        spec_no = item.get("bfSpecRgstNo", "N/A")
+        deadline = item.get("opnEndDt", "N/A")
+        agency = item.get("ordInsttNm", "N/A")
+        spec_url = item.get("ntceSpecDocUrl1", "")
+
+        # Budget (pre-spec)
+        budget_amt = item.get("asignBdgtAmt", "0")
+        try:
+            budget_formatted = f"{int(budget_amt):,}원" if budget_amt and budget_amt != "0" else "미공개"
+        except (ValueError, TypeError):
+            budget_formatted = "미공개"
+
+        results.append(f"### [PRESPEC-{idx}] {spec_name}")
+        results.append(f"- 사전규격번호: {spec_no}")
+        results.append(f"- 발주기관: {agency}")
+        results.append(f"- 배정예산: {budget_formatted}")
+        results.append(f"- 의견마감일시: {deadline}")
+        if spec_url:
+            results.append(f"- 제안요청서 URL: {spec_url}")
+        results.append("")
+
+    return "\n".join(results)
 
 
 async def analyze_bid_detail(file_url: str, filename: str, department_profile: str = "") -> str:
@@ -392,9 +535,9 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_bids_by_keyword",
             description=(
-                "Search Korean government procurement bid notices (나라장터 입찰공고) "
-                "for the last 30 days using a keyword. Returns service-type (용역) bids "
-                "including consulting, development, and SI projects."
+                "Search Korean government procurement notices (나라장터) for the last 30 days. "
+                "Returns BOTH regular bid notices (입찰공고) AND preliminary specifications (사전규격) "
+                "for service-type (용역) projects including consulting, development, and SI."
             ),
             inputSchema={
                 "type": "object",
@@ -413,9 +556,10 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="recommend_bids_for_dept",
             description=(
-                "Search bids with department context for personalized recommendations. "
-                "Returns up to 30 results with instructions for LLM to filter Top 5 "
-                "most relevant bids based on department profile."
+                "Search government procurement notices with department context for personalized recommendations. "
+                "Returns up to 60 results (30 regular bids + 30 pre-specs) with analysis instructions. "
+                "LLM can flexibly present Top N items or all relevant items based on user's request. "
+                "Prioritizes items with non-zero budgets."
             ),
             inputSchema={
                 "type": "object",

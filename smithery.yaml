@@ -11,6 +11,5 @@ configSchema:
       type: "string"
       title: "Nara API Key"
       description: "API key from data.go.kr (공공데이터포털 ServiceKey)"
-      required: true
   required:
     - NARA_API_KEY

@@ -9,8 +9,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 애플리케이션 파일 복사
-COPY server.py .
-COPY file_extractor.py .
+COPY server.py file_extractor.py ./
 
 # MCP 서버 실행
 CMD ["python", "server.py"]
