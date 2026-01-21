@@ -8,6 +8,8 @@ Nara MCP Server - Korean Government Procurement Bid Search
 import sys
 import os
 
+print("🚀 NaraMcp Server is starting...", file=sys.stderr)
+
 # Force UTF-8 encoding for Windows
 if sys.platform == 'win32':
     # Set environment variables for UTF-8
