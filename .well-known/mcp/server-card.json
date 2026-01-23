@@ -21,7 +21,7 @@
   "tools": [
     {
       "name": "get_bids_by_keyword",
-      "description": "Search Korean government procurement notices (나라장터) for the last 30 days. Returns BOTH regular bid notices (입찰공고) AND preliminary specifications (사전규격) for service-type (용역) projects including consulting, development, and SI.",
+      "description": "Search Korean government procurement notices (나라장터) for the last 7 days. Returns BOTH regular bid notices (입찰공고) AND preliminary specifications (사전규격) for service-type (용역) projects including consulting, development, and SI.",
       "inputSchema": {
         "type": "object",
         "properties": {
