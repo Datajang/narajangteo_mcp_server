@@ -70,6 +70,34 @@ def is_bid_open(close_datetime_str: str) -> bool:
         return True
 
 
+def filter_proposal_files(item: dict) -> list[tuple[str, str]]:
+    """
+    API 응답에서 "제안요청서" 또는 "제안"을 포함한 파일만 필터링
+
+    Args:
+        item: API 응답 아이템 (dict)
+
+    Returns:
+        List of (url, filename) tuples for proposal-related files
+    """
+    proposal_files = []
+
+    for i in range(1, 11):  # ntceSpecDocUrl1 ~ ntceSpecDocUrl10
+        url_key = f"ntceSpecDocUrl{i}"
+        name_key = f"ntceSpecFileNm{i}"
+
+        url = item.get(url_key, "")
+        filename = item.get(name_key, "")
+
+        # URL과 파일명이 모두 있는 경우만 처리
+        if url and filename:
+            # "제안요청서" 또는 "제안"이 포함된 파일만 선택
+            if "제안요청서" in filename or "제안" in filename:
+                proposal_files.append((url, filename))
+
+    return proposal_files
+
+
 async def search_bids_by_keyword(keyword: str) -> str:
     """
     Search for service-type bid notices AND preliminary specifications.
@@ -200,7 +228,6 @@ async def search_bids_by_keyword(keyword: str) -> str:
             bid_name = item.get("bidNtceNm", "N/A")
             bid_no = item.get("bidNtceNo", "N/A")
             deadline = item.get("bidClseDt", "N/A")
-            spec_url = item.get("ntceSpecDocUrl1", "")
             demand_org = item.get("dminsttNm", "N/A")
 
             # Budget info
@@ -222,8 +249,13 @@ async def search_bids_by_keyword(keyword: str) -> str:
             results.append(f"   🏢 수요기관: {demand_org}\n")
             results.append(f"   💰 예산: {budget_formatted}\n")
             results.append(f"   ⏰ 마감일시: {deadline}\n")
-            if spec_url:
-                results.append(f"   📎 제안요청서: {spec_url}\n")
+
+            # 제안요청서 파일 필터링
+            proposal_files = filter_proposal_files(item)
+            if proposal_files:
+                results.append(f"   📎 제안요청서:\n")
+                for url, filename in proposal_files:
+                    results.append(f"      - {filename}: {url}\n")
             else:
                 results.append(f"   📎 제안요청서: 없음\n")
             results.append("\n" + "-" * 80 + "\n")
@@ -242,7 +274,6 @@ async def search_bids_by_keyword(keyword: str) -> str:
             spec_no = item.get("bfSpecRgstNo", "N/A")
             deadline = item.get("opnEndDt", "N/A")
             agency = item.get("ordInsttNm", "N/A")
-            spec_url = item.get("ntceSpecDocUrl1", "")
 
             # Budget info (pre-spec uses different field)
             budget_amt = item.get("asignBdgtAmt", "0")
@@ -256,8 +287,13 @@ async def search_bids_by_keyword(keyword: str) -> str:
             results.append(f"   🏢 발주기관: {agency}\n")
             results.append(f"   💰 배정예산: {budget_formatted}\n")
             results.append(f"   ⏰ 의견마감일시: {deadline}\n")
-            if spec_url:
-                results.append(f"   📎 제안요청서: {spec_url}\n")
+
+            # 제안요청서 파일 필터링
+            proposal_files = filter_proposal_files(item)
+            if proposal_files:
+                results.append(f"   📎 제안요청서:\n")
+                for url, filename in proposal_files:
+                    results.append(f"      - {filename}: {url}\n")
             else:
                 results.append(f"   📎 제안요청서: 없음\n")
             results.append("\n" + "-" * 80 + "\n")
@@ -419,7 +455,6 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
         deadline = item.get("bidClseDt", "N/A")
         demand_org = item.get("dminsttNm", "N/A")
         bid_url = item.get("bidNtceDtlUrl", "")
-        spec_url = item.get("ntceSpecDocUrl1", "")
 
         # Budget
         bdgt_amt = item.get("bdgtAmt", "0")
@@ -442,8 +477,13 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
         results.append(f"- 마감일시: {deadline}")
         if bid_url:
             results.append(f"- 공고 URL: {bid_url}")
-        if spec_url:
-            results.append(f"- 제안요청서 URL: {spec_url}")
+
+        # 제안요청서 파일 필터링
+        proposal_files = filter_proposal_files(item)
+        if proposal_files:
+            results.append(f"- 제안요청서:")
+            for url, filename in proposal_files:
+                results.append(f"  - {filename}: {url}")
         results.append("")
 
     # Section 2: Preliminary Specifications
@@ -453,7 +493,6 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
         spec_no = item.get("bfSpecRgstNo", "N/A")
         deadline = item.get("opnEndDt", "N/A")
         agency = item.get("ordInsttNm", "N/A")
-        spec_url = item.get("ntceSpecDocUrl1", "")
 
         # Budget (pre-spec)
         budget_amt = item.get("asignBdgtAmt", "0")
@@ -467,8 +506,13 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
         results.append(f"- 발주기관: {agency}")
         results.append(f"- 배정예산: {budget_formatted}")
         results.append(f"- 의견마감일시: {deadline}")
-        if spec_url:
-            results.append(f"- 제안요청서 URL: {spec_url}")
+
+        # 제안요청서 파일 필터링
+        proposal_files = filter_proposal_files(item)
+        if proposal_files:
+            results.append(f"- 제안요청서:")
+            for url, filename in proposal_files:
+                results.append(f"  - {filename}: {url}")
         results.append("")
 
     return "\n".join(results)

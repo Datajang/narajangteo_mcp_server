@@ -316,7 +316,8 @@ A: 📄 Bid Document Analysis
 - **MCP SDK**: `mcp[cli]` - Model Context Protocol server framework
 - **HTTP Client**: `httpx` - Async HTTP requests
 - **File Extraction**:
-  - `olefile` - HWP (MS OLE format)
+  - `langchain-teddynote` - Enhanced HWP extraction with zlib compression support
+  - `olefile` - HWP fallback (legacy MS OLE format)
   - `pypdf` - PDF text extraction
   - `python-docx` - DOCX parsing
   - `openpyxl` - XLSX reading

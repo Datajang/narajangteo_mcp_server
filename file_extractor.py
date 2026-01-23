@@ -24,6 +24,12 @@ except ImportError:
     HAS_OLEFILE = False
 
 try:
+    from langchain_teddynote.document_loaders import HWPLoader
+    HAS_HWPLOADER = True
+except ImportError:
+    HAS_HWPLOADER = False
+
+try:
     from pypdf import PdfReader
     HAS_PYPDF = True
 except ImportError:
@@ -79,13 +85,13 @@ def select_best_file_from_zip(file_list: list[str]) -> Optional[str]:
     return None
 
 
-def extract_from_hwp(file_bytes: bytes) -> str:
+def _extract_from_hwp_olefile(file_bytes: bytes) -> str:
     """
-    HWP 파일에서 텍스트 추출 (olefile 사용)
+    Fallback: olefile을 사용한 HWP 추출 (기존 구현)
     DRM/암호화 시 "HWP Protected" 반환
     """
     if not HAS_OLEFILE:
-        return "HWP extraction requires olefile library."
+        return "HWP extraction requires olefile or langchain-teddynote library."
 
     try:
         ole = olefile.OleFileIO(io.BytesIO(file_bytes))
@@ -138,6 +144,62 @@ def extract_from_hwp(file_bytes: bytes) -> str:
 
     except Exception as e:
         return f"HWP extraction failed: {str(e)}"
+
+
+def extract_from_hwp(file_bytes: bytes) -> str:
+    """
+    HWP 파일에서 텍스트 추출
+    1차: HWPLoader (langchain-teddynote) - 높은 정확도, zlib 압축 지원
+    2차: olefile 직접 파싱 - 폴백
+    """
+    # Primary: Try HWPLoader
+    if HAS_HWPLOADER:
+        temp_file_path = None
+        try:
+            # 1. 임시 파일 생성 (.hwp 확장자 필수)
+            with tempfile.NamedTemporaryFile(
+                mode='wb',
+                suffix='.hwp',
+                delete=False
+            ) as temp_file:
+                temp_file.write(file_bytes)
+                temp_file_path = temp_file.name
+
+            # 2. HWPLoader로 로드
+            loader = HWPLoader(file_path=temp_file_path)
+            documents = list(loader.lazy_load())
+
+            # 3. Document에서 텍스트 추출
+            if documents:
+                text_parts = [
+                    doc.page_content
+                    for doc in documents
+                    if doc.page_content.strip()
+                ]
+                if text_parts:
+                    return '\n\n'.join(text_parts)
+
+            # HWPLoader 성공했지만 텍스트 없음 → olefile fallback
+            return _extract_from_hwp_olefile(file_bytes)
+
+        except Exception as e:
+            # HWPLoader 실패 → olefile fallback
+            # 디버깅을 위한 로그 출력
+            import sys
+            print(f"[DEBUG] HWPLoader failed, falling back to olefile: {str(e)}", file=sys.stderr)
+            return _extract_from_hwp_olefile(file_bytes)
+
+        finally:
+            # 4. 임시 파일 정리
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.unlink(temp_file_path)
+                except:
+                    pass  # 정리 실패 무시
+
+    # HWPLoader 없음 → olefile 직접 사용
+    else:
+        return _extract_from_hwp_olefile(file_bytes)
 
 
 def extract_from_hwpx(file_bytes: bytes) -> str:
