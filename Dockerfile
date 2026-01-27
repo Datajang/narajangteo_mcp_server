@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y \
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 COPY main.py ./
+# ADD THIS LINE:
+COPY .well-known/ ./.well-known/
 
 # 의존성 설치
 RUN pip install --no-cache-dir -e .
