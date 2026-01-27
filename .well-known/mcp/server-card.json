@@ -1,7 +1,4 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json",
-  "version": "1.0",
-  "protocolVersion": "2025-06-18",
   "serverInfo": {
     "name": "nara-mcp-server",
     "title": "Nara MCP Server",
@@ -73,6 +70,8 @@
       }
     }
   ],
+  "resources": [],
+  "prompts": [],
   "instructions": "This server requires a NARA_API_KEY environment variable. Get your API key from https://www.data.go.kr/ by searching for '나라장터 입찰정보' and registering for the BidPublicInfoService.",
   "_meta": {
     "license": "MIT",
