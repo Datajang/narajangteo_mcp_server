@@ -1,13 +1,23 @@
-runtime: python
+# Smithery configuration file: https://smithery.ai/docs/build/project-config
+
 build:
-  installCommand: pip install -e .
-startCommand: python -m smithery.cli.start
-configSchema:
-  type: object
-  properties:
-    api_key:
-      type: string
-      title: "API Key"
-      description: "나라장터 API 키 (data.go.kr 공공데이터포털에서 발급)"
-  required:
-    - api_key
+  dockerBuildPath: .
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - api_key
+    properties:
+      api_key:
+        type: string
+        title: "API Key"
+        description: "나라장터 API 키 (data.go.kr 공공데이터포털에서 발급)"
+  commandFunction:
+    |-
+    (config) => ({
+      command: 'python',
+      args: ['-m', 'nara_server.server'],
+      env: { NARA_API_KEY: config.api_key }
+    })
