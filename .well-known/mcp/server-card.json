@@ -77,7 +77,6 @@
   "instructions": "This server requires a NARA_API_KEY environment variable. Get your API key from https://www.data.go.kr/ by searching for '나라장터 입찰정보' and registering for the BidPublicInfoService.",
   "_meta": {
     "license": "MIT",
-    "repository": "https://github.com/Datajang/narajangteo_mcp_server",
     "author": "Datajang",
     "keywords": ["government", "procurement", "bid", "g2b", "korea", "나라장터"]
   }
