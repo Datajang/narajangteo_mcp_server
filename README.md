@@ -2,20 +2,6 @@
 
 MCP server for searching Korean government procurement bid notices from G2B (나라장터 - Nara Jangteo).
 
-Built with [Smithery CLI](https://smithery.ai) for the Model Context Protocol.
-
-## Quick Start (Smithery)
-
-Smithery.ai에서 바로 사용할 수 있습니다:
-
-1. [smithery.ai](https://smithery.ai)에 접속
-2. "Nara MCP Server" 또는 "나라장터" 검색
-3. "Add to Claude" 클릭
-4. API 키 입력 (공공데이터포털에서 발급)
-5. Claude에서 바로 사용!
-
-> **Note**: Smithery에 배포되면 npx나 별도 설치 없이 바로 사용 가능합니다.
-
 ## Features
 
 - 🔍 **통합 검색**: 최근 7일간 용역 입찰공고 + 사전규격을 키워드로 검색
@@ -26,6 +12,36 @@ Smithery.ai에서 바로 사용할 수 있습니다:
 - 🏢 **맞춤형 추천**: 부서 프로필 기반 유연한 추천 (Top N 또는 전체 목록)
 - 📄 **다형식 지원**: HWP, HWPX, PDF, DOCX, XLSX, ZIP 파일 자동 처리
 - 🎯 **전략 분석**: 첨부파일 기반 입찰 전략 제안
+
+## Quick Start
+
+Get started in 3 steps:
+
+1. **Install from PyPI**
+   ```bash
+   pip install nara-mcp-server
+   ```
+
+2. **Get API key**
+   Visit [공공데이터포털](https://www.data.go.kr/) and search for "조달청_나라장터 입찰공고정보서비스"
+
+3. **Configure Claude Desktop**
+   Add to `claude_desktop_config.json`:
+   ```json
+   {
+     "mcpServers": {
+       "nara-jangteo": {
+         "command": "nara-server",
+         "env": {
+           "NARA_API_KEY": "your_service_key_here"
+         }
+       }
+     }
+   }
+   ```
+
+4. **Start using!**
+   Restart Claude Desktop and ask: "나라장터에서 'AI' 키워드로 입찰공고를 검색해줘"
 
 ## Prerequisites
 
@@ -46,33 +62,29 @@ Smithery.ai에서 바로 사용할 수 있습니다:
 
 ## Installation
 
-### Prerequisites
+### Option 1: From PyPI (Recommended)
 
-- **Smithery API key**: Get yours at [smithery.ai/account/api-keys](https://smithery.ai/account/api-keys)
-- **Python 3.10+** required
-- **uv** package manager (recommended) - Install: `pip install uv`
-
-### Option 1: From Source (권장)
-
-```bash
-git clone https://github.com/Datajang/narajangteo_mcp_server.git
-cd narajangteo_mcp_server
-
-# Install dependencies
-pip install -e .
-# OR with uv (faster)
-uv pip install -e .
-```
-
-### Option 2: From PyPI (향후 제공 예정)
+The simplest way to install:
 
 ```bash
 pip install nara-mcp-server
 ```
 
+**Note**: This installs the `nara-server` command globally for easy access.
+
+### Option 2: From Source (For Development)
+
+If you want to contribute or modify the code:
+
+```bash
+git clone https://github.com/Datajang/narajangteo_mcp_server.git
+cd narajangteo_mcp_server
+pip install -e .
+```
+
 ## Configuration
 
-### Method 1: Environment Variable (Recommended for Local Development)
+### Using .env File (Recommended for Development)
 
 Create a `.env` file in the project root:
 
@@ -81,17 +93,7 @@ Create a `.env` file in the project root:
 NARA_API_KEY=your_service_key_from_data_go_kr
 ```
 
-### Method 2: Session Configuration (Smithery Deployment)
-
-When connecting to the server, you can provide the API key via session configuration:
-
-```json
-{
-  "api_key": "your_service_key_here"
-}
-```
-
-The server automatically prioritizes session config over environment variables.
+The `.env` file is automatically loaded when running the server.
 
 ### Claude Desktop Configuration
 
@@ -99,34 +101,45 @@ The server automatically prioritizes session config over environment variables.
 - **MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
 
-**Option A: Using uv (권장)**
+**Recommended: Using installed package**
 
 ```json
 {
   "mcpServers": {
     "nara-jangteo": {
-      "command": "uv",
-      "args": ["run", "start"],
-      "cwd": "/absolute/path/to/narajangteo_mcp_server",
+      "command": "uvx",
+    "args": [
+        "--python",
+        "3.11",
+        "--from",
+        "nara-mcp-server",
+        "nara-server"
+      ],
       "env": {
-        "NARA_API_KEY": "여기에_발급받은_ServiceKey_입력"
+        "NARA_API_KEY": "발급받은 API KEY"
       }
     }
   }
 }
 ```
 
-**Option B: Using traditional Python**
+**Alternative: Using Python directly (if not installed globally)**
 
 ```json
 {
   "mcpServers": {
     "nara-jangteo": {
-      "command": "python",
-      "args": ["-m", "nara_server.server"],
-      "cwd": "/absolute/path/to/narajangteo_mcp_server",
+      "command": "uvx",
+    "args": [
+        "--python",
+        "3.11",
+        "--from",
+        "nara-mcp-server",
+        "nara-server"
+      ],
       "env": {
-        "NARA_API_KEY": "여기에_발급받은_ServiceKey_입력"
+        "NARA_API_KEY": "발급받은 API KEY",
+        "UV_LINK_MODE": "copy"
       }
     }
   }
@@ -134,9 +147,9 @@ The server automatically prioritizes session config over environment variables.
 ```
 
 **중요 사항:**
-- `cwd`는 프로젝트 루트의 **절대 경로**로 지정
-- Windows 경로는 `\\`로 구분 (예: `C:\\Users\\...`)
+- PyPI 설치 시 `nara-server` 명령어가 자동으로 등록됩니다
 - `NARA_API_KEY`에 발급받은 ServiceKey 입력
+- Claude Desktop 재시작 필요
 
 ### Other MCP Clients
 
@@ -453,48 +466,53 @@ narajangteo_mcp_server/
 
 ## Development
 
-### Local Development with Smithery CLI
+### Setting up development environment
 
 ```bash
-# Set environment variable (or use .env file)
+# Clone repository
+git clone https://github.com/Datajang/narajangteo_mcp_server.git
+cd narajangteo_mcp_server
+
+# Install in editable mode
+pip install -e .
+
+# Set environment variable
 export NARA_API_KEY="your_service_key_here"  # MacOS/Linux
 set NARA_API_KEY=your_service_key_here       # Windows
 
-# Run in development mode (with auto-reload)
-uv run dev
+# Or use .env file (recommended)
+echo "NARA_API_KEY=your_key" > .env
+```
 
-# Run in production mode
-uv run start
+### Running the server
 
-# Test interactively with playground
-uv run playground
+```bash
+# Run directly
+nara-server
+
+# Or using Python module
+python -m nara_server.server
 ```
 
 ### Testing with MCP Inspector
 
+MCP Inspector provides an interactive UI for testing tools:
+
 ```bash
-# Install MCP Inspector
+# Install Inspector
 npm install -g @modelcontextprotocol/inspector
 
-# Run with inspector
-npx @modelcontextprotocol/inspector uv run start
+# Run with Inspector (automatically loads .env)
+npx @modelcontextprotocol/inspector python -m nara_server.server
 ```
 
-### Deploying to Smithery
+The Inspector will open http://localhost:6274 with:
+- Interactive tool testing
+- Real-time request/response logs
+- Tool parameter validation
 
-Ready to deploy? Push your code to GitHub and deploy to Smithery:
-
-1. Create a new repository at [github.com/new](https://github.com/new)
-
-2. Initialize git and push to GitHub:
-   ```bash
-   git add .
-   git commit -m "Nara MCP Server with Smithery"
-   git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
-   git push -u origin main
-   ```
-
-3. Deploy your server to Smithery at [smithery.ai/new](https://smithery.ai/new)
+**Prerequisites:**
+- Node.js 18+ ([Download](https://nodejs.org/))
 
 ## Contributing
 
@@ -516,8 +534,9 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ## Links
 
-- **Repository**: https://github.com/Datajang/nara-mcp-server
-- **Issues**: https://github.com/Datajang/nara-mcp-server/issues
+- **PyPI Package**: https://pypi.org/project/nara-mcp-server/
+- **GitHub Repository**: https://github.com/Datajang/narajangteo_mcp_server
+- **Issues**: https://github.com/Datajang/narajangteo_mcp_server/issues
 - **공공데이터포털**: https://www.data.go.kr/
 - **나라장터**: https://www.g2b.go.kr/
 

@@ -10,7 +10,7 @@ where = ["src"]
 
 [project]
 name = "nara-mcp-server"
-version = "1.1.0"
+version = "1.1.1"
 description = "MCP server for searching Korean government procurement bids (나라장터 입찰공고)"
 readme = "README.md"
 requires-python = ">=3.10"
