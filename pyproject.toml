@@ -43,9 +43,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Datajang/narajangteo_mcp_server"
-Repository = "https://github.com/Datajang/narajangteo_mcp_server"
-Issues = "https://github.com/Datajang/narajangteo_mcp_server/issues"
+# Homepage = "https://github.com/Datajang/narajangteo_mcp_server"
+# Repository = "https://github.com/Datajang/narajangteo_mcp_server"
+# Issues = "https://github.com/Datajang/narajangteo_mcp_server/issues"
 
 [project.optional-dependencies]
 dev = [
