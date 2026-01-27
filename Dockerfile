@@ -18,12 +18,13 @@ RUN apt-get update && apt-get install -y \
     libxslt-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# pyproject.toml과 소스 복사
-COPY pyproject.toml .
+# 전체 프로젝트 복사
+COPY pyproject.toml README.md ./
 COPY src/ ./src/
+COPY main.py ./
 
 # 의존성 설치
 RUN pip install --no-cache-dir -e .
 
 # MCP 서버 실행 (smithery.yaml commandFunction과 일치)
-CMD ["python", "-m", "nara_server.server"]
+CMD ["python", "main.py"]

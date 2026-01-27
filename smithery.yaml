@@ -1,8 +1,9 @@
-# Smithery configuration file: https://smithery.ai/docs/build/project-config
+# Smithery configuration file: https://smithery.ai/docs/build/project-config/smithery.yaml
 
 startCommand:
   type: stdio
   configSchema:
+    # JSON Schema defining the configuration options for the MCP server
     type: object
     properties:
       api_key:
@@ -10,15 +11,33 @@ startCommand:
         title: "API Key"
         description: "나라장터 API 키 (data.go.kr 공공데이터포털에서 발급)"
     required: []
-  commandFunction:
-    |-
+  commandFunction: |
     (config) => ({
-      command: 'python',
-      args: ['-m', 'nara_server.server'],
-      env: {
-        PYTHONUNBUFFERED: "1",
-        ...(config.api_key && { NARA_API_KEY: config.api_key })
+      "command": "python",
+      "args": ["main.py"],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        ...(config.api_key && { "NARA_API_KEY": config.api_key })
       }
     })
   exampleConfig:
     api_key: "your_api_key_here"
+
+build:
+  dockerBuildPath: .
+
+metadata:
+  name: "Nara MCP Server"
+  description: "MCP server for searching Korean government procurement bids from G2B (나라장터)"
+  version: "1.1.0"
+  author: "Datajang"
+  license: "MIT"
+  keywords:
+    - g2b
+    - government
+    - procurement
+    - bid
+    - korea
+    - 나라장터
+    - 입찰공고
+    - mcp
