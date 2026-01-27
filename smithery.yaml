@@ -1,23 +1,24 @@
 # Smithery configuration file: https://smithery.ai/docs/build/project-config
 
-build:
-  dockerBuildPath: .
-
 startCommand:
   type: stdio
   configSchema:
     type: object
-    required:
-      - api_key
     properties:
       api_key:
         type: string
         title: "API Key"
         description: "나라장터 API 키 (data.go.kr 공공데이터포털에서 발급)"
+    required: []
   commandFunction:
     |-
     (config) => ({
       command: 'python',
       args: ['-m', 'nara_server.server'],
-      env: { NARA_API_KEY: config.api_key }
+      env: {
+        PYTHONUNBUFFERED: "1",
+        ...(config.api_key && { NARA_API_KEY: config.api_key })
+      }
     })
+  exampleConfig:
+    api_key: "your_api_key_here"

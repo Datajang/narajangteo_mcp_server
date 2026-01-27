@@ -25,5 +25,5 @@ COPY src/ ./src/
 # 의존성 설치
 RUN pip install --no-cache-dir -e .
 
-# Smithery HTTP 모드로 실행
-CMD ["python", "-m", "smithery.cli.start"]
+# MCP 서버 실행 (smithery.yaml commandFunction과 일치)
+CMD ["python", "-m", "nara_server.server"]
