@@ -1,22 +1,13 @@
-name: "NaraMcp"
-
-runtime: "container"
-
+runtime: python
 build:
-  dockerfile: "Dockerfile"
-  dockerBuildPath: "."
-
-startCommand:
-  type: "stdio"
-  command: "python"
-  args: ["server.py"]
-
+  installCommand: pip install -e .
+startCommand: python -m smithery.cli.start
 configSchema:
   type: object
   properties:
-    NARA_API_KEY:
+    api_key:
       type: string
-      title: "Nara API Key"
-      description: "API key from data.go.kr (공공데이터포털 ServiceKey)"
+      title: "API Key"
+      description: "나라장터 API 키 (data.go.kr 공공데이터포털에서 발급)"
   required:
-    - NARA_API_KEY
+    - api_key

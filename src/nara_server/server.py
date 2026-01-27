@@ -3,47 +3,108 @@
 """
 Nara MCP Server - Korean Government Procurement Bid Search
 나라장터 입찰공고 검색 MCP 서버
+
+Built with Smithery CLI for Model Context Protocol
 """
 
 import sys
 import os
+import logging
+from datetime import datetime, timedelta
+from typing import Optional
 
-print("🚀 NaraMcp Server is starting...", file=sys.stderr)
+import httpx
+from mcp.server.fastmcp import Context, FastMCP
+from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+
+from smithery.decorators import smithery
+
+from .file_extractor import extract_text_from_url
+
+# Configure logging to write to stderr
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stderr,
+)
+logger = logging.getLogger("nara-mcp-server")
 
 # Force UTF-8 encoding for Windows
 if sys.platform == 'win32':
-    # Set environment variables for UTF-8
     os.environ['PYTHONIOENCODING'] = 'utf-8'
-    # Reconfigure stdout/stderr to use UTF-8
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(encoding='utf-8')
 
-from datetime import datetime, timedelta
-
-import httpx
-from mcp.server.fastmcp import FastMCP
-
-from file_extractor import extract_text_from_url
-
 # API Configuration
-SERVICE_KEY = os.getenv("NARA_API_KEY", "")
-
 BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
 ENDPOINT = "getBidPblancListInfoServcPPSSrch"
 PRESPEC_ENDPOINT = "getBfSpecRgstSttusListInfoServcPPSSrch"
 
 
+# Configuration Schema for Session
+class ConfigSchema(BaseModel):
+    """Configuration schema for Nara MCP Server"""
+    api_key: str = Field(
+        "",
+        description="Your Nara API key from data.go.kr (공공데이터포털 ServiceKey). "
+                    "Get it from https://www.data.go.kr/ by searching for '나라장터 입찰정보'."
+    )
+
+
+def get_api_key(ctx: Context) -> str:
+    """
+    Get API key from session config or environment variable.
+
+    Priority:
+    1. Session config (Smithery HTTP mode)
+    2. Environment variable (STDIO mode, local dev, Docker)
+
+    Args:
+        ctx: MCP Context with session configuration
+
+    Returns:
+        API key string
+
+    Raises:
+        ValueError: If API key is not found in any source
+    """
+    # Load .env file for local development
+    load_dotenv()
+
+    # First try session config (Smithery HTTP transport)
+    if ctx and ctx.session_config and hasattr(ctx.session_config, 'api_key'):
+        if ctx.session_config.api_key:
+            logger.info("Using API key from session config (Smithery)")
+            return ctx.session_config.api_key
+
+    # Fall back to environment variable (STDIO transport, local dev)
+    api_key = os.getenv("NARA_API_KEY", "")
+    if api_key:
+        logger.info("Using API key from environment variable")
+        return api_key
+
+    # No API key found - raise error with helpful message
+    raise ValueError(
+        "NARA_API_KEY not found.\n"
+        "For local development (MCP Inspector, Claude Desktop):\n"
+        "  1. Create .env file with: NARA_API_KEY=your_key\n"
+        "  2. Or set environment variable: set NARA_API_KEY=your_key\n"
+        "For Smithery deployment:\n"
+        "  - API key will be provided via session config automatically"
+    )
+
+
 def get_date_range_for_last_month() -> tuple[int, int]:
     """
-    Get date range for the last 7 days (reduced from 30 to increase open bid rate).
+    Get date range for the last 7 days.
     Returns: (start_date, end_date) in YYYYMMDDHHMM format as integers
     """
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7)
 
-    # Format: YYYYMMDDHHMM
     start_dt_int = int(start_date.strftime("%Y%m%d0000"))
     end_dt_int = int(end_date.strftime("%Y%m%d2359"))
 
@@ -52,73 +113,67 @@ def get_date_range_for_last_month() -> tuple[int, int]:
 
 def is_bid_open(close_datetime_str: str) -> bool:
     """
-    입찰 마감일시가 현재 시간 이후인지 확인
+    Check if bid deadline is in the future.
 
     Args:
-        close_datetime_str: 마감일시 문자열 (YYYYMMDDHHMM 형식)
+        close_datetime_str: Deadline in YYYYMMDDHHMM format
 
     Returns:
-        True if 마감일이 미래 (진행중), False if 마감됨
+        True if bid is still open, False if closed
     """
     try:
-        # Parse: "202501201430" -> datetime object
         close_dt = datetime.strptime(close_datetime_str, "%Y%m%d%H%M")
-        now = datetime.now()
-        return close_dt > now
+        return close_dt > datetime.now()
     except:
-        # 파싱 실패 시 일단 포함 (안전)
         return True
 
 
 def filter_proposal_files(item: dict) -> list[tuple[str, str]]:
     """
-    API 응답에서 "제안요청서" 또는 "제안"을 포함한 파일만 필터링
+    Filter files containing "제안요청서" or "제안" from API response.
 
     Args:
-        item: API 응답 아이템 (dict)
+        item: API response item
 
     Returns:
-        List of (url, filename) tuples for proposal-related files
+        List of (url, filename) tuples for proposal files
     """
     proposal_files = []
 
-    for i in range(1, 11):  # ntceSpecDocUrl1 ~ ntceSpecDocUrl10
+    for i in range(1, 11):
         url_key = f"ntceSpecDocUrl{i}"
         name_key = f"ntceSpecFileNm{i}"
 
         url = item.get(url_key, "")
         filename = item.get(name_key, "")
 
-        # URL과 파일명이 모두 있는 경우만 처리
         if url and filename:
-            # "제안요청서" 또는 "제안"이 포함된 파일만 선택
             if "제안요청서" in filename or "제안" in filename:
                 proposal_files.append((url, filename))
 
     return proposal_files
 
 
-async def search_bids_by_keyword(keyword: str) -> str:
+async def search_bids_by_keyword(keyword: str, service_key: str) -> str:
     """
     Search for service-type bid notices AND preliminary specifications.
-    Returns both regular bids and pre-specs in separate sections.
 
     Args:
-        keyword: Search term for bid title / pre-spec title
+        keyword: Search term for bid title
+        service_key: API key
 
     Returns:
         Formatted string with both bid notices and preliminary specifications
     """
-    # Validate API key
-    if not SERVICE_KEY:
+    if not service_key:
         return (
-            "❌ Error: NARA_API_KEY environment variable is required.\n"
-            "Please set your API key in the MCP client configuration.\n"
+            "❌ Error: NARA_API_KEY is required.\n"
+            "Please set your API key in the session configuration or environment variable.\n"
             "Get your API key from: https://www.data.go.kr/\n"
             "Search for '나라장터 입찰정보' and register for the service."
         )
 
-    # Ensure keyword is properly encoded as UTF-8
+    # Ensure UTF-8 encoding
     if isinstance(keyword, bytes):
         keyword = keyword.decode('utf-8', errors='replace')
     else:
@@ -128,9 +183,9 @@ async def search_bids_by_keyword(keyword: str) -> str:
     start_date_str = str(start_date)[:8]
     end_date_str = str(end_date)[:8]
 
-    # ========== SECTION 1: Regular Bid Notices ==========
+    # Regular Bid Notices
     bid_params = {
-        "ServiceKey": SERVICE_KEY,
+        "ServiceKey": service_key,
         "type": "json",
         "inqryDiv": "1",
         "inqryBgnDt": start_date,
@@ -166,17 +221,17 @@ async def search_bids_by_keyword(keyword: str) -> str:
                     item_list = []
 
                 open_bids = [item for item in item_list if is_bid_open(item.get("bidClseDt", ""))]
-    except Exception:
-        pass  # Continue to pre-spec search even if bid search fails
+    except Exception as e:
+        logger.error(f"Error fetching bid notices: {e}")
 
-    # ========== SECTION 2: Preliminary Specifications ==========
+    # Preliminary Specifications
     prespec_params = {
-        "ServiceKey": SERVICE_KEY,
+        "ServiceKey": service_key,
         "type": "json",
         "inqryDiv": "1",
         "inqryBgnDt": start_date,
         "inqryEndDt": end_date,
-        "bfSpecNm": keyword,  # Different parameter name!
+        "bfSpecNm": keyword,
         "numOfRows": "20",
         "pageNo": "1"
     }
@@ -207,14 +262,13 @@ async def search_bids_by_keyword(keyword: str) -> str:
                     item_list = []
 
                 open_prespecs = [item for item in item_list if is_bid_open(item.get("opnEndDt", ""))]
-    except Exception:
-        pass  # Continue even if pre-spec search fails
+    except Exception as e:
+        logger.error(f"Error fetching pre-specs: {e}")
 
-    # ========== Check if both searches returned nothing ==========
     if not open_bids and not open_prespecs:
         return f"📭 No bid notices or preliminary specifications found for keyword: '{keyword}' in the last 7 days."
 
-    # ========== Format Results ==========
+    # Format Results
     results = []
 
     # Section 1: Regular Bid Notices
@@ -233,12 +287,7 @@ async def search_bids_by_keyword(keyword: str) -> str:
             # Budget info
             bdgt_amt = item.get("bdgtAmt", "0")
             presmp_prce = item.get("presmptPrce", "0")
-            if bdgt_amt and str(bdgt_amt) != "0":
-                budget = bdgt_amt
-            elif presmp_prce and str(presmp_prce) != "0":
-                budget = presmp_prce
-            else:
-                budget = "0"
+            budget = bdgt_amt if bdgt_amt and str(bdgt_amt) != "0" else presmp_prce if presmp_prce and str(presmp_prce) != "0" else "0"
             try:
                 budget_formatted = f"{int(budget):,}원" if budget != "0" else "미공개"
             except (ValueError, TypeError):
@@ -250,7 +299,6 @@ async def search_bids_by_keyword(keyword: str) -> str:
             results.append(f"   💰 예산: {budget_formatted}\n")
             results.append(f"   ⏰ 마감일시: {deadline}\n")
 
-            # 제안요청서 파일 필터링
             proposal_files = filter_proposal_files(item)
             if proposal_files:
                 results.append(f"   📎 제안요청서:\n")
@@ -275,7 +323,6 @@ async def search_bids_by_keyword(keyword: str) -> str:
             deadline = item.get("opnEndDt", "N/A")
             agency = item.get("ordInsttNm", "N/A")
 
-            # Budget info (pre-spec uses different field)
             budget_amt = item.get("asignBdgtAmt", "0")
             try:
                 budget_formatted = f"{int(budget_amt):,}원" if budget_amt and budget_amt != "0" else "미공개"
@@ -288,7 +335,6 @@ async def search_bids_by_keyword(keyword: str) -> str:
             results.append(f"   💰 배정예산: {budget_formatted}\n")
             results.append(f"   ⏰ 의견마감일시: {deadline}\n")
 
-            # 제안요청서 파일 필터링
             proposal_files = filter_proposal_files(item)
             if proposal_files:
                 results.append(f"   📎 제안요청서:\n")
@@ -303,26 +349,23 @@ async def search_bids_by_keyword(keyword: str) -> str:
     return "".join(results)
 
 
-async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
+async def search_bids_for_dept(keyword: str, department_profile: str, service_key: str) -> str:
     """
-    부서 맞춤형 통합 검색 (일반 입찰 + 사전규격)
-    최대 60개 결과 (입찰 30 + 사전규격 30)를 LLM에게 전달
-    LLM이 사용자 요청에 따라 유연하게 대응 (Top N 또는 전체)
+    Department-specific integrated search with up to 60 results.
 
     Args:
-        keyword: 검색 키워드
-        department_profile: 부서/팀 설명
+        keyword: Search keyword
+        department_profile: Team/department description
+        service_key: API key
 
     Returns:
-        60개 결과 + 부서 프로필 컨텍스트 + LLM 지시문
+        60 results with department context and LLM instructions
     """
-    # Validate API key
-    if not SERVICE_KEY:
+    if not service_key:
         return (
-            "❌ Error: NARA_API_KEY environment variable is required.\n"
-            "Please set your API key in the MCP client configuration.\n"
-            "Get your API key from: https://www.data.go.kr/\n"
-            "Search for '나라장터 입찰정보' and register for the service."
+            "❌ Error: NARA_API_KEY is required.\n"
+            "Please set your API key in the session configuration or environment variable.\n"
+            "Get your API key from: https://www.data.go.kr/"
         )
 
     if isinstance(keyword, bytes):
@@ -332,9 +375,9 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
 
     start_date, end_date = get_date_range_for_last_month()
 
-    # ========== API 1: Regular Bid Notices (30개) ==========
+    # Regular Bid Notices (30)
     bid_params = {
-        "ServiceKey": SERVICE_KEY,
+        "ServiceKey": service_key,
         "type": "json",
         "inqryDiv": "1",
         "inqryBgnDt": start_date,
@@ -370,12 +413,12 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
                     item_list = []
 
                 open_bids = [item for item in item_list if is_bid_open(item.get("bidClseDt", ""))]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Error in dept search (bids): {e}")
 
-    # ========== API 2: Preliminary Specifications (30개) ==========
+    # Preliminary Specifications (30)
     prespec_params = {
-        "ServiceKey": SERVICE_KEY,
+        "ServiceKey": service_key,
         "type": "json",
         "inqryDiv": "1",
         "inqryBgnDt": start_date,
@@ -411,13 +454,13 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
                     item_list = []
 
                 open_prespecs = [item for item in item_list if is_bid_open(item.get("opnEndDt", ""))]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Error in dept search (prespecs): {e}")
 
     if not open_bids and not open_prespecs:
         return f"📭 No bid notices or preliminary specifications found for keyword: '{keyword}'"
 
-    # ========== Format Results with LLM Instructions ==========
+    # Format Results with LLM Instructions
     results = [
         f"🎯 Department-Filtered Integrated Search Results",
         f"",
@@ -456,15 +499,9 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
         demand_org = item.get("dminsttNm", "N/A")
         bid_url = item.get("bidNtceDtlUrl", "")
 
-        # Budget
         bdgt_amt = item.get("bdgtAmt", "0")
         presmp_prce = item.get("presmptPrce", "0")
-        if bdgt_amt and str(bdgt_amt) != "0":
-            budget = bdgt_amt
-        elif presmp_prce and str(presmp_prce) != "0":
-            budget = presmp_prce
-        else:
-            budget = "0"
+        budget = bdgt_amt if bdgt_amt and str(bdgt_amt) != "0" else presmp_prce if presmp_prce and str(presmp_prce) != "0" else "0"
         try:
             budget_formatted = f"{int(budget):,}원" if budget != "0" else "미공개"
         except (ValueError, TypeError):
@@ -478,7 +515,6 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
         if bid_url:
             results.append(f"- 공고 URL: {bid_url}")
 
-        # 제안요청서 파일 필터링
         proposal_files = filter_proposal_files(item)
         if proposal_files:
             results.append(f"- 제안요청서:")
@@ -494,7 +530,6 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
         deadline = item.get("opnEndDt", "N/A")
         agency = item.get("ordInsttNm", "N/A")
 
-        # Budget (pre-spec)
         budget_amt = item.get("asignBdgtAmt", "0")
         try:
             budget_formatted = f"{int(budget_amt):,}원" if budget_amt and budget_amt != "0" else "미공개"
@@ -507,7 +542,6 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
         results.append(f"- 배정예산: {budget_formatted}")
         results.append(f"- 의견마감일시: {deadline}")
 
-        # 제안요청서 파일 필터링
         proposal_files = filter_proposal_files(item)
         if proposal_files:
             results.append(f"- 제안요청서:")
@@ -518,185 +552,157 @@ async def search_bids_for_dept(keyword: str, department_profile: str) -> str:
     return "\n".join(results)
 
 
-async def analyze_bid_detail(file_url: str, filename: str, department_profile: str = "") -> str:
-    """
-    입찰공고 첨부파일 다운로드 및 텍스트 추출 (§9)
+@smithery.server(config_schema=ConfigSchema)
+def create_server():
+    """Create and configure the Nara MCP server."""
 
-    Args:
-        file_url: 첨부파일 URL (ntceSpecDocUrl1)
-        filename: 파일명 (ntceSpecFileNm1)
-        department_profile: 부서/팀 설명 (선택)
+    server = FastMCP("Nara MCP Server")
 
-    Returns:
-        추출된 텍스트 + 분석 프롬프트 컨텍스트
-    """
-    try:
-        # 파일 다운로드 및 텍스트 추출
-        extracted_text = await extract_text_from_url(file_url, filename)
+    @server.tool()
+    async def get_bids_by_keyword(
+        keyword: str,
+        ctx: Context = None
+    ) -> str:
+        """
+        Search Korean government procurement notices (나라장터) for the last 7 days.
+        Returns BOTH regular bid notices (입찰공고) AND preliminary specifications (사전규격)
+        for service-type (용역) projects including consulting, development, and SI.
 
-        # 텍스트 길이 제한 (너무 길면 요약 필요)
-        max_chars = 15000
-        if len(extracted_text) > max_chars:
-            extracted_text = extracted_text[:max_chars] + "\n\n... [Text truncated due to length]"
+        Args:
+            keyword: Search keyword for bid title (공고명).
+                     Examples: '인공지능', 'AI', '플랫폼', '시스템 구축', etc.
 
-        # 결과 포맷팅
-        results = [
-            f"📄 **Bid Document Analysis**",
-            f"",
-            f"📎 **File:** {filename}",
-            f"🔗 **Source:** {file_url}",
-        ]
+        Returns:
+            Formatted string with bid information
+        """
+        if not keyword:
+            return "❌ Error: 'keyword' parameter is required"
 
-        if department_profile:
+        service_key = get_api_key(ctx)
+        return await search_bids_by_keyword(keyword, service_key)
+
+    @server.tool()
+    async def recommend_bids_for_dept(
+        keyword: str,
+        department_profile: str,
+        ctx: Context = None
+    ) -> str:
+        """
+        Search government procurement notices with department context for personalized recommendations.
+        Returns up to 60 results (30 regular bids + 30 pre-specs) with analysis instructions.
+        LLM can flexibly present Top N items or all relevant items based on user's request.
+        Prioritizes items with non-zero budgets.
+
+        Args:
+            keyword: Search keyword (e.g., 'AI', 'Cloud', '플랫폼')
+            department_profile: Description of your team/department.
+                               Examples: 'UI/UX 디자인팀', 'Database Migration Unit',
+                                        'AI/ML 개발팀', '클라우드 인프라팀'
+
+        Returns:
+            Formatted recommendations with strategic analysis
+        """
+        if not keyword:
+            return "❌ Error: 'keyword' parameter is required"
+        if not department_profile:
+            return "❌ Error: 'department_profile' parameter is required"
+
+        service_key = get_api_key(ctx)
+        return await search_bids_for_dept(keyword, department_profile, service_key)
+
+    @server.tool()
+    async def analyze_bid_detail(
+        file_url: str,
+        filename: str,
+        department_profile: str = "",
+        ctx: Context = None
+    ) -> str:
+        """
+        Download and extract text from bid attachment (RFP/제안요청서) for strategic analysis.
+        Supports HWP, HWPX, PDF, DOCX, XLSX, and ZIP files.
+        ZIP files are processed with priority: 제안요청서 > 과업지시서 > .hwp > .pdf
+
+        Args:
+            file_url: Attachment URL (ntceSpecDocUrl1 from search results)
+            filename: Filename (ntceSpecFileNm1 from search results)
+            department_profile: Optional - Your team description for strategic analysis.
+                               If provided, response includes analysis prompts for Fit Score,
+                               Core Tasks, Winning Strategy, and Risk Factors.
+
+        Returns:
+            Extracted document text with optional analysis prompts
+        """
+        if not file_url:
+            return "❌ Error: 'file_url' parameter is required"
+        if not filename:
+            return "❌ Error: 'filename' parameter is required"
+
+        try:
+            extracted_text = await extract_text_from_url(file_url, filename)
+
+            results = [
+                f"# 📄 Bid Document Analysis",
+                f"",
+                f"**File:** {filename}",
+                f"**Source:** {file_url}",
+                f""
+            ]
+
+            if department_profile:
+                results.extend([
+                    f"📋 **Department Profile:** {department_profile}",
+                    f"",
+                    f"=" * 80,
+                    f"",
+                    f"**Instructions for Strategic Analysis:**",
+                    f"Based on the extracted text below, analyze this project from the perspective of '{department_profile}':",
+                    f"1. **Fit Score (0-100):** How well does this project match the team's skills?",
+                    f"2. **Core Tasks:** List only tasks that this team would perform",
+                    f"3. **Winning Strategy:** Suggest 3 specific approaches to appeal to the client",
+                    f"4. **Risk Factors:** Identify risky clauses (tech stack, timeline, penalties)",
+                    f"",
+                    f"=" * 80,
+                ])
+
             results.extend([
                 f"",
-                f"📋 **Department Profile:** {department_profile}",
+                f"## Extracted Document Content:",
                 f"",
-                f"=" * 80,
-                f"",
-                f"**Instructions for Strategic Analysis:**",
-                f"Based on the extracted text below, analyze this project from the perspective of '{department_profile}':",
-                f"1. **Fit Score (0-100):** How well does this project match the team's skills?",
-                f"2. **Core Tasks:** List only tasks that this team would perform",
-                f"3. **Winning Strategy:** Suggest 3 specific approaches to appeal to the client",
-                f"4. **Risk Factors:** Identify risky clauses (tech stack, timeline, penalties)",
-                f"",
-                f"=" * 80,
+                extracted_text
             ])
 
-        results.extend([
-            f"",
-            f"## Extracted Document Content:",
-            f"",
-            extracted_text
-        ])
+            return "\n".join(results)
 
-        return "\n".join(results)
+        except Exception as e:
+            logger.error(f"Error analyzing bid detail: {e}")
+            return f"❌ Failed to analyze bid document: {str(e)}\n\nManual link: {file_url}"
 
-    except Exception as e:
-        return f"❌ Failed to analyze bid document: {str(e)}\n\nManual link: {file_url}"
+    # Add a resource
+    @server.resource("info://nara-procurement")
+    def nara_info() -> str:
+        """Information about Nara procurement bid service."""
+        return (
+            "Nara MCP Server provides access to Korean government procurement bids (나라장터).\n"
+            "Search for service-type (용역) projects including consulting, development, and SI.\n"
+            "Data is sourced from the Korea Public Procurement Service API."
+        )
+
+    return server
 
 
-# Create FastMCP server instance
-mcp = FastMCP("nara-mcp-server")
-
-
-@mcp.tool()
-async def get_bids_by_keyword(keyword: str) -> str:
+def main():
     """
-    Search Korean government procurement notices (나라장터) for the last 30 days.
-    Returns BOTH regular bid notices (입찰공고) AND preliminary specifications (사전규격)
-    for service-type (용역) projects including consulting, development, and SI.
+    CLI entry point for local STDIO mode.
 
-    Args:
-        keyword: Search keyword for bid title (공고명).
-                 Examples: '인공지능', 'AI', '플랫폼', '시스템 구축', etc.
+    This function is used by:
+    1. pyproject.toml [project.scripts] nara-server command
+    2. python -m nara_server.server
 
-    Returns:
-        Formatted string with bid information
+    For Smithery deployment, use: uv run start (HTTP transport)
     """
-    if not keyword:
-        return "❌ Error: 'keyword' parameter is required"
-
-    return await search_bids_by_keyword(keyword)
-
-
-@mcp.tool()
-async def recommend_bids_for_dept(keyword: str, department_profile: str) -> str:
-    """
-    Search government procurement notices with department context for personalized recommendations.
-    Returns up to 60 results (30 regular bids + 30 pre-specs) with analysis instructions.
-    LLM can flexibly present Top N items or all relevant items based on user's request.
-    Prioritizes items with non-zero budgets.
-
-    Args:
-        keyword: Search keyword (e.g., 'AI', 'Cloud', '플랫폼')
-        department_profile: Description of your team/department.
-                           Examples: 'UI/UX 디자인팀', 'Database Migration Unit',
-                                    'AI/ML 개발팀', '클라우드 인프라팀'
-
-    Returns:
-        Formatted recommendations with strategic analysis
-    """
-    if not keyword:
-        return "❌ Error: 'keyword' parameter is required"
-    if not department_profile:
-        return "❌ Error: 'department_profile' parameter is required"
-
-    return await search_bids_for_dept(keyword, department_profile)
-
-
-@mcp.tool()
-async def analyze_bid_detail(file_url: str, filename: str, department_profile: str = "") -> str:
-    """
-    Download and extract text from bid attachment (RFP/제안요청서) for strategic analysis.
-    Supports HWP, HWPX, PDF, DOCX, XLSX, and ZIP files.
-    ZIP files are processed with priority: 제안요청서 > 과업지시서 > .hwp > .pdf
-
-    Args:
-        file_url: Attachment URL (ntceSpecDocUrl1 from search results)
-        filename: Filename (ntceSpecFileNm1 from search results)
-        department_profile: Optional - Your team description for strategic analysis.
-                           If provided, response includes analysis prompts for Fit Score,
-                           Core Tasks, Winning Strategy, and Risk Factors.
-
-    Returns:
-        Extracted document text with optional analysis prompts
-    """
-    if not file_url:
-        return "❌ Error: 'file_url' parameter is required"
-    if not filename:
-        return "❌ Error: 'filename' parameter is required"
-
-    # file_url and filename parameters
-    results = []
-
-    try:
-        # Extract text from the file
-        extracted_text = await extract_text_from_url(file_url, filename)
-
-        # Add header
-        results.extend([
-            f"# 📄 Bid Document Analysis",
-            f"",
-            f"**File:** {filename}",
-            f"**Source:** {file_url}",
-            f""
-        ])
-
-        # Add strategic analysis prompt if department_profile is provided
-        if department_profile:
-            results.extend([
-                f"📋 **Department Profile:** {department_profile}",
-                f"",
-                f"=" * 80,
-                f"",
-                f"**Instructions for Strategic Analysis:**",
-                f"Based on the extracted text below, analyze this project from the perspective of '{department_profile}':",
-                f"1. **Fit Score (0-100):** How well does this project match the team's skills?",
-                f"2. **Core Tasks:** List only tasks that this team would perform",
-                f"3. **Winning Strategy:** Suggest 3 specific approaches to appeal to the client",
-                f"4. **Risk Factors:** Identify risky clauses (tech stack, timeline, penalties)",
-                f"",
-                f"=" * 80,
-            ])
-
-        results.extend([
-            f"",
-            f"## Extracted Document Content:",
-            f"",
-            extracted_text
-        ])
-
-        return "\n".join(results)
-
-    except Exception as e:
-        return f"❌ Failed to analyze bid document: {str(e)}\n\nManual link: {file_url}"
+    mcp_server = create_server()
+    mcp_server.run(transport="stdio")
 
 
 if __name__ == "__main__":
-    # Run with streamable-http transport for Smithery deployment
-    # Default host 0.0.0.0 allows external connections (required for containers)
-    # Default port 8000 is standard for MCP streamable-http
-    print("🚀 NaraMcp Server starting via stdio...", file=sys.stderr)
-    mcp.run(transport="stdio")
+    main()

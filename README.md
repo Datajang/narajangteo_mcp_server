@@ -2,6 +2,20 @@
 
 MCP server for searching Korean government procurement bid notices from G2B (나라장터 - Nara Jangteo).
 
+Built with [Smithery CLI](https://smithery.ai) for the Model Context Protocol.
+
+## Quick Start (Smithery)
+
+Smithery.ai에서 바로 사용할 수 있습니다:
+
+1. [smithery.ai](https://smithery.ai)에 접속
+2. "Nara MCP Server" 또는 "나라장터" 검색
+3. "Add to Claude" 클릭
+4. API 키 입력 (공공데이터포털에서 발급)
+5. Claude에서 바로 사용!
+
+> **Note**: Smithery에 배포되면 npx나 별도 설치 없이 바로 사용 가능합니다.
+
 ## Features
 
 - 🔍 **통합 검색**: 최근 7일간 용역 입찰공고 + 사전규격을 키워드로 검색
@@ -32,12 +46,22 @@ MCP server for searching Korean government procurement bid notices from G2B (나
 
 ## Installation
 
+### Prerequisites
+
+- **Smithery API key**: Get yours at [smithery.ai/account/api-keys](https://smithery.ai/account/api-keys)
+- **Python 3.10+** required
+- **uv** package manager (recommended) - Install: `pip install uv`
+
 ### Option 1: From Source (권장)
 
 ```bash
 git clone https://github.com/Datajang/narajangteo_mcp_server.git
 cd narajangteo_mcp_server
-pip install -r requirements.txt
+
+# Install dependencies
+pip install -e .
+# OR with uv (faster)
+uv pip install -e .
 ```
 
 ### Option 2: From PyPI (향후 제공 예정)
@@ -48,22 +72,59 @@ pip install nara-mcp-server
 
 ## Configuration
 
-### Claude Desktop
+### Method 1: Environment Variable (Recommended for Local Development)
 
-Claude Desktop의 설정 파일을 수정하여 MCP 서버를 연결합니다.
+Create a `.env` file in the project root:
+
+```bash
+# .env
+NARA_API_KEY=your_service_key_from_data_go_kr
+```
+
+### Method 2: Session Configuration (Smithery Deployment)
+
+When connecting to the server, you can provide the API key via session configuration:
+
+```json
+{
+  "api_key": "your_service_key_here"
+}
+```
+
+The server automatically prioritizes session config over environment variables.
+
+### Claude Desktop Configuration
 
 **설정 파일 위치:**
 - **MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
 
-**설정 예시:**
+**Option A: Using uv (권장)**
+
+```json
+{
+  "mcpServers": {
+    "nara-jangteo": {
+      "command": "uv",
+      "args": ["run", "start"],
+      "cwd": "/absolute/path/to/narajangteo_mcp_server",
+      "env": {
+        "NARA_API_KEY": "여기에_발급받은_ServiceKey_입력"
+      }
+    }
+  }
+}
+```
+
+**Option B: Using traditional Python**
 
 ```json
 {
   "mcpServers": {
     "nara-jangteo": {
       "command": "python",
-      "args": ["C:\\absolute\\path\\to\\naraMcp\\server.py"],
+      "args": ["-m", "nara_server.server"],
+      "cwd": "/absolute/path/to/narajangteo_mcp_server",
       "env": {
         "NARA_API_KEY": "여기에_발급받은_ServiceKey_입력"
       }
@@ -73,20 +134,42 @@ Claude Desktop의 설정 파일을 수정하여 MCP 서버를 연결합니다.
 ```
 
 **중요 사항:**
-- `args`의 경로는 **절대 경로**로 지정
+- `cwd`는 프로젝트 루트의 **절대 경로**로 지정
 - Windows 경로는 `\\`로 구분 (예: `C:\\Users\\...`)
 - `NARA_API_KEY`에 발급받은 ServiceKey 입력
 
 ### Other MCP Clients
 
-Continue, Cline 등 다른 MCP 클라이언트에서도 동일한 방식으로 환경변수 설정:
+Continue, Cline 등 다른 MCP 클라이언트도 동일한 방식으로 설정 가능합니다.
 
-```json
-{
-  "env": {
-    "NARA_API_KEY": "your_service_key_here"
-  }
-}
+## Development & Testing
+
+### Using .env File (Recommended)
+
+For local development, create a `.env` file:
+
+```bash
+# .env
+NARA_API_KEY=your_service_key_here
+```
+
+The `.env` file is automatically loaded and **not tracked by git** (.gitignore).
+
+**Benefits:**
+- No need to set environment variables every time
+- Works across all terminals
+- Easier for MCP Inspector testing
+
+**Example workflow:**
+```bash
+# 1. Copy example file
+cp .env.example .env
+
+# 2. Edit .env and add your API key
+# NARA_API_KEY=your_actual_key
+
+# 3. Run MCP Inspector (no env setup needed!)
+npx @modelcontextprotocol/inspector uv --directory . run python -m nara_server.server
 ```
 
 ## Available Tools
@@ -335,43 +418,56 @@ A: 📄 Bid Document Analysis
 ## Technical Stack
 
 - **Python**: 3.10+
-- **MCP SDK**: `mcp[cli]` - Model Context Protocol server framework
-- **HTTP Client**: `httpx` - Async HTTP requests
+- **MCP Framework**:
+  - `mcp>=1.15.0` - Model Context Protocol SDK
+  - `smithery>=0.4.2` - Smithery CLI for MCP server development
+- **HTTP Client**: `httpx>=0.27.0` - Async HTTP requests
 - **File Extraction**:
-  - `langchain-teddynote` - Enhanced HWP extraction (primary, with zlib compression support)
-  - `olefile` - HWP fallback (legacy MS OLE format parser)
-  - `pypdf` - PDF text extraction
-  - `python-docx` - DOCX parsing
-  - `openpyxl` - XLSX reading
+  - `langchain-teddynote>=0.3.9` - Enhanced HWP extraction (primary, with zlib compression support)
+  - `olefile>=0.47` - HWP fallback (legacy MS OLE format parser)
+  - `pypdf>=4.0` - PDF text extraction
+  - `python-docx>=1.1` - DOCX parsing
+  - `openpyxl>=3.1` - XLSX reading
 - **LLM Integration**:
-  - `langchain` - Document loading framework
-  - `langchain-core` - Core LangChain utilities
+  - `langchain>=0.1.0,<1.0.0` - Document loading framework
+  - `langchain-core>=0.1.0,<1.0.0` - Core LangChain utilities
+- **Utilities**:
+  - `python-dotenv>=1.0.0` - Environment variable management
 
 ## Project Structure
 
 ```
-naraMcp/
-├── server.py              # Main MCP server
-├── file_extractor.py      # Multi-format file text extraction
-├── pyproject.toml         # Python project metadata
-├── requirements.txt       # Python dependencies
-├── README.md              # This file
-├── CLAUDE.md              # Developer guide
-├── SMITHERY_GUIDE.md      # Publishing guide
-└── LICENSE                # MIT License
+narajangteo_mcp_server/
+├── src/
+│   └── nara_server/
+│       ├── __init__.py          # Package initialization
+│       ├── server.py             # Main MCP server with Smithery
+│       └── file_extractor.py     # Multi-format file text extraction
+├── pyproject.toml                # Python project metadata & dependencies
+├── smithery.yaml                 # Smithery deployment configuration
+├── .env                          # Environment variables (local)
+├── README.md                     # This file
+├── CLAUDE.md                     # Developer guide
+└── LICENSE                       # MIT License
 ```
 
 ## Development
 
-### Local Testing
+### Local Development with Smithery CLI
 
 ```bash
-# Set environment variable
+# Set environment variable (or use .env file)
 export NARA_API_KEY="your_service_key_here"  # MacOS/Linux
 set NARA_API_KEY=your_service_key_here       # Windows
 
-# Run server
-python server.py
+# Run in development mode (with auto-reload)
+uv run dev
+
+# Run in production mode
+uv run start
+
+# Test interactively with playground
+uv run playground
 ```
 
 ### Testing with MCP Inspector
@@ -381,8 +477,24 @@ python server.py
 npm install -g @modelcontextprotocol/inspector
 
 # Run with inspector
-mcp-inspector python server.py
+npx @modelcontextprotocol/inspector uv run start
 ```
+
+### Deploying to Smithery
+
+Ready to deploy? Push your code to GitHub and deploy to Smithery:
+
+1. Create a new repository at [github.com/new](https://github.com/new)
+
+2. Initialize git and push to GitHub:
+   ```bash
+   git add .
+   git commit -m "Nara MCP Server with Smithery"
+   git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
+   git push -u origin main
+   ```
+
+3. Deploy your server to Smithery at [smithery.ai/new](https://smithery.ai/new)
 
 ## Contributing
 

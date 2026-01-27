@@ -1,8 +1,16 @@
+# Node.js
 node_modules/
 build/
 *.log
+
+# Environment
 .env
+.env.local
+
+# OS
 .DS_Store
+
+# Python
 venv/
 __pycache__/
 *.pyc
@@ -12,3 +20,30 @@ __pycache__/
 *.so
 *.egg-info/
 dist/
+
+# UV
+uv.lock
+.uv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+*.egg
+*.whl
+.eggs/
+
+# Temporary files
+*_error_log.txt
+*_error.txt
+nul
+smithery_error.txt
+
+# Claude Code
+.claude/
+
+# MCP Configuration (local development)
+.mcp.json

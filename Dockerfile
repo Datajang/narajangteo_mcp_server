@@ -18,12 +18,12 @@ RUN apt-get update && apt-get install -y \
     libxslt-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 의존성 파일 복사 및 설치
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# pyproject.toml과 소스 복사
+COPY pyproject.toml .
+COPY src/ ./src/
 
-# 애플리케이션 파일 복사
-COPY server.py file_extractor.py ./
+# 의존성 설치
+RUN pip install --no-cache-dir -e .
 
-# MCP 서버 실행
-CMD ["python", "server.py"]
+# Smithery HTTP 모드로 실행
+CMD ["python", "-m", "smithery.cli.start"]
