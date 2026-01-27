@@ -8,7 +8,6 @@
     "version": "1.1.0"
   },
   "description": "MCP server for searching Korean government procurement bids (나라장터 입찰공고). Search service-type bids, get personalized recommendations, and analyze RFP attachments.",
-  "documentationUrl": "https://github.com/Datajang/narajangteo_mcp_server#readme",
   "transport": {
     "type": "stdio"
   },
