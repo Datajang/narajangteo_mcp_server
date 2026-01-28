@@ -31,9 +31,17 @@ Get started in 3 steps:
    {
      "mcpServers": {
        "nara-jangteo": {
-         "command": "nara-server",
+         "command": "uvx",
+       "args": [
+           "--python",
+           "3.11",
+           "--from",
+           "nara-mcp-server",
+           "nara-server"
+         ],
          "env": {
-           "NARA_API_KEY": "your_service_key_here"
+           "NARA_API_KEY": "발급받은 API KEY",
+           "UV_LINK_MODE": "copy"
          }
        }
      }
@@ -116,7 +124,8 @@ The `.env` file is automatically loaded when running the server.
         "nara-server"
       ],
       "env": {
-        "NARA_API_KEY": "발급받은 API KEY"
+        "NARA_API_KEY": "발급받은 API KEY",
+        "UV_LINK_MODE": "copy"
       }
     }
   }
