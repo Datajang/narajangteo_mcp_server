@@ -8,7 +8,6 @@ Features:
 - Integrated search: Regular bids + Pre-specs
 - Budget information included
 - File extraction (HWP, PDF, DOCX, etc.)
-- Smithery deployment support
 
 Usage:
     python main.py
