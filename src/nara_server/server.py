@@ -97,13 +97,13 @@ def get_api_key(ctx: Context) -> str:
     )
 
 
-def get_date_range_for_last_month() -> tuple[int, int]:
+def get_date_range(days: int = 7) -> tuple[int, int]:
     """
-    Get date range for the last 7 days.
+    Get date range for the last N days.
     Returns: (start_date, end_date) in YYYYMMDDHHMM format as integers
     """
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=7)
+    start_date = end_date - timedelta(days=days)
 
     start_dt_int = int(start_date.strftime("%Y%m%d0000"))
     end_dt_int = int(end_date.strftime("%Y%m%d2359"))
@@ -154,7 +154,7 @@ def filter_proposal_files(item: dict) -> list[tuple[str, str]]:
     return proposal_files
 
 
-async def search_bids_by_keyword(keyword: str, service_key: str) -> str:
+async def search_bids_by_keyword(keyword: str, service_key: str, days: int = 7) -> str:
     """
     Search for service-type bid notices AND preliminary specifications.
 
@@ -179,7 +179,7 @@ async def search_bids_by_keyword(keyword: str, service_key: str) -> str:
     else:
         keyword = keyword.encode('utf-8', errors='replace').decode('utf-8')
 
-    start_date, end_date = get_date_range_for_last_month()
+    start_date, end_date = get_date_range(days)
     start_date_str = str(start_date)[:8]
     end_date_str = str(end_date)[:8]
 
@@ -266,7 +266,7 @@ async def search_bids_by_keyword(keyword: str, service_key: str) -> str:
         logger.error(f"Error fetching pre-specs: {e}")
 
     if not open_bids and not open_prespecs:
-        return f"📭 No bid notices or preliminary specifications found for keyword: '{keyword}' in the last 7 days."
+        return f"📭 No bid notices or preliminary specifications found for keyword: '{keyword}' in the last {days} days."
 
     # Format Results
     results = []
@@ -274,7 +274,7 @@ async def search_bids_by_keyword(keyword: str, service_key: str) -> str:
     # Section 1: Regular Bid Notices
     results.append(f"🔍 **일반 입찰 공고 (Regular Bids)**\n")
     results.append(f"Found {bid_total} bid notice(s) total, {len(open_bids)} still open\n")
-    results.append(f"📅 Search period: {start_date_str} ~ {end_date_str}\n")
+    results.append(f"📅 Search period: {start_date_str} ~ {end_date_str} (last {days} days)\n")
     results.append("=" * 80 + "\n")
 
     if open_bids:
@@ -349,7 +349,7 @@ async def search_bids_by_keyword(keyword: str, service_key: str) -> str:
     return "".join(results)
 
 
-async def search_bids_for_dept(keyword: str, department_profile: str, service_key: str) -> str:
+async def search_bids_for_dept(keyword: str, department_profile: str, service_key: str, days: int = 7) -> str:
     """
     Department-specific integrated search with up to 60 results.
 
@@ -373,7 +373,7 @@ async def search_bids_for_dept(keyword: str, department_profile: str, service_ke
     else:
         keyword = keyword.encode('utf-8', errors='replace').decode('utf-8')
 
-    start_date, end_date = get_date_range_for_last_month()
+    start_date, end_date = get_date_range(days)
 
     # Regular Bid Notices (30)
     bid_params = {
@@ -561,16 +561,19 @@ def create_server():
     @server.tool()
     async def get_bids_by_keyword(
         keyword: str,
+        days: int = 7,
         ctx: Context = None
     ) -> str:
         """
-        Search Korean government procurement notices (나라장터) for the last 7 days.
+        Search Korean government procurement notices (나라장터).
         Returns BOTH regular bid notices (입찰공고) AND preliminary specifications (사전규격)
         for service-type (용역) projects including consulting, development, and SI.
 
         Args:
             keyword: Search keyword for bid title (공고명).
                      Examples: '인공지능', 'AI', '플랫폼', '시스템 구축', etc.
+            days: Search window in days from today (default: 7).
+                  Increase for older bids, e.g. 30, 60, 90.
 
         Returns:
             Formatted string with bid information
@@ -579,12 +582,13 @@ def create_server():
             return "❌ Error: 'keyword' parameter is required"
 
         service_key = get_api_key(ctx)
-        return await search_bids_by_keyword(keyword, service_key)
+        return await search_bids_by_keyword(keyword, service_key, days=days)
 
     @server.tool()
     async def recommend_bids_for_dept(
         keyword: str,
         department_profile: str,
+        days: int = 7,
         ctx: Context = None
     ) -> str:
         """
@@ -598,6 +602,8 @@ def create_server():
             department_profile: Description of your team/department.
                                Examples: 'UI/UX 디자인팀', 'Database Migration Unit',
                                         'AI/ML 개발팀', '클라우드 인프라팀'
+            days: Search window in days from today (default: 7).
+                  Increase for older bids, e.g. 30, 60, 90.
 
         Returns:
             Formatted recommendations with strategic analysis
@@ -608,7 +614,7 @@ def create_server():
             return "❌ Error: 'department_profile' parameter is required"
 
         service_key = get_api_key(ctx)
-        return await search_bids_for_dept(keyword, department_profile, service_key)
+        return await search_bids_for_dept(keyword, department_profile, service_key, days=days)
 
     @server.tool()
     async def analyze_bid_detail(
