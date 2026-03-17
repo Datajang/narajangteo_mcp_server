@@ -18,7 +18,17 @@ from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
-from smithery.decorators import smithery
+try:
+    from smithery.decorators import smithery
+except ImportError:
+    # smithery not installed — no-op decorator for STDIO mode (Claude Desktop, local dev)
+    class _NoOpSmithery:
+        @staticmethod
+        def server(config_schema=None):
+            def decorator(func):
+                return func
+            return decorator
+    smithery = _NoOpSmithery()
 
 from .file_extractor import extract_text_from_url
 
