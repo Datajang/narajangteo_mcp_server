@@ -3,32 +3,16 @@
 """
 Nara MCP Server - Korean Government Procurement Bid Search
 나라장터 입찰공고 검색 MCP 서버
-
-Built with Smithery CLI for Model Context Protocol
 """
 
 import sys
 import os
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
 
 import httpx
-from mcp.server.fastmcp import Context, FastMCP
-from pydantic import BaseModel, Field
+from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
-
-try:
-    from smithery.decorators import smithery
-except ImportError:
-    # smithery not installed — no-op decorator for STDIO mode (Claude Desktop, local dev)
-    class _NoOpSmithery:
-        @staticmethod
-        def server(config_schema=None):
-            def decorator(func):
-                return func
-            return decorator
-    smithery = _NoOpSmithery()
 
 from .file_extractor import extract_text_from_url
 
@@ -54,56 +38,15 @@ ENDPOINT = "getBidPblancListInfoServcPPSSrch"
 PRESPEC_ENDPOINT = "getBfSpecRgstSttusListInfoServcPPSSrch"
 
 
-# Configuration Schema for Session
-class ConfigSchema(BaseModel):
-    """Configuration schema for Nara MCP Server"""
-    api_key: str = Field(
-        "",
-        description="Your Nara API key from data.go.kr (공공데이터포털 ServiceKey). "
-                    "Get it from https://www.data.go.kr/ by searching for '나라장터 입찰정보'."
-    )
-
-
-def get_api_key(ctx: Context) -> str:
-    """
-    Get API key from session config or environment variable.
-
-    Priority:
-    1. Session config (Smithery HTTP mode)
-    2. Environment variable (STDIO mode, local dev, Docker)
-
-    Args:
-        ctx: MCP Context with session configuration
-
-    Returns:
-        API key string
-
-    Raises:
-        ValueError: If API key is not found in any source
-    """
-    # Load .env file for local development
+def get_api_key() -> str:
     load_dotenv()
-
-    # First try session config (Smithery HTTP transport)
-    if ctx and ctx.session_config and hasattr(ctx.session_config, 'api_key'):
-        if ctx.session_config.api_key:
-            logger.info("Using API key from session config (Smithery)")
-            return ctx.session_config.api_key
-
-    # Fall back to environment variable (STDIO transport, local dev)
     api_key = os.getenv("NARA_API_KEY", "")
     if api_key:
-        logger.info("Using API key from environment variable")
         return api_key
-
-    # No API key found - raise error with helpful message
     raise ValueError(
         "NARA_API_KEY not found.\n"
-        "For local development (MCP Inspector, Claude Desktop):\n"
-        "  1. Create .env file with: NARA_API_KEY=your_key\n"
-        "  2. Or set environment variable: set NARA_API_KEY=your_key\n"
-        "For Smithery deployment:\n"
-        "  - API key will be provided via session config automatically"
+        "Create .env file with: NARA_API_KEY=your_key\n"
+        "Or set environment variable: set NARA_API_KEY=your_key"
     )
 
 
@@ -562,7 +505,6 @@ async def search_bids_for_dept(keyword: str, department_profile: str, service_ke
     return "\n".join(results)
 
 
-@smithery.server(config_schema=ConfigSchema)
 def create_server():
     """Create and configure the Nara MCP server."""
 
@@ -572,7 +514,6 @@ def create_server():
     async def get_bids_by_keyword(
         keyword: str,
         days: int = 7,
-        ctx: Context = None
     ) -> str:
         """
         Search Korean government procurement notices (나라장터).
@@ -591,7 +532,7 @@ def create_server():
         if not keyword:
             return "❌ Error: 'keyword' parameter is required"
 
-        service_key = get_api_key(ctx)
+        service_key = get_api_key()
         return await search_bids_by_keyword(keyword, service_key, days=days)
 
     @server.tool()
@@ -599,7 +540,6 @@ def create_server():
         keyword: str,
         department_profile: str,
         days: int = 7,
-        ctx: Context = None
     ) -> str:
         """
         Search government procurement notices with department context for personalized recommendations.
@@ -623,7 +563,7 @@ def create_server():
         if not department_profile:
             return "❌ Error: 'department_profile' parameter is required"
 
-        service_key = get_api_key(ctx)
+        service_key = get_api_key()
         return await search_bids_for_dept(keyword, department_profile, service_key, days=days)
 
     @server.tool()
@@ -631,7 +571,6 @@ def create_server():
         file_url: str,
         filename: str,
         department_profile: str = "",
-        ctx: Context = None
     ) -> str:
         """
         Download and extract text from bid attachment (RFP/제안요청서) for strategic analysis.
