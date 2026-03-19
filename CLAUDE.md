@@ -18,9 +18,6 @@ uv run python -m nara_server.server
 # Run as named script
 uv run nara-server
 
-# Run HTTP mode for Smithery
-uv run start
-
 # Test interactively with MCP Inspector (requires Node.js 18+)
 npx @modelcontextprotocol/inspector uv --directory . run python -m nara_server.server
 
@@ -40,18 +37,15 @@ export NARA_API_KEY=your_key  # Linux/Mac
 
 ## Architecture
 
-### Dual-Transport Design
+### Transport
 
-The server supports two transports, controlled by `@smithery.server(config_schema=ConfigSchema)` in `server.py`:
+STDIO only (`main()` → `mcp_server.run(transport="stdio")`). Used by Claude Desktop and direct Python invocation. API key comes from `NARA_API_KEY` env var or `.env` file.
 
-- **STDIO** (`main()` → `mcp_server.run(transport="stdio")`): Used by Claude Desktop, direct Python invocation. API key comes from `NARA_API_KEY` env var or `.env` file.
-- **HTTP** (Smithery deployment, `uv run start`): API key passed via `ctx.session_config.api_key` per-session.
+`get_api_key()` resolves: env var → raises `ValueError`.
 
-`get_api_key(ctx)` resolves in order: session config → env var → raises `ValueError`.
+### Dual-API Search with Date Chunking
 
-### Dual-API Search
-
-Every search hits **two separate endpoints** in parallel (sequential in current code):
+Every search hits **two separate endpoints** sequentially, split into **15-day chunks** to work around the API's date range limit (requests spanning >~15 days return 404).
 
 | Endpoint | Type | Keyword param | Deadline field | Budget field |
 |---|---|---|---|---|
@@ -60,7 +54,11 @@ Every search hits **two separate endpoints** in parallel (sequential in current 
 
 Base URL: `http://apis.data.go.kr/1230000/ad/BidPublicInfoService`
 
-Both only search "Service" (용역) type bids — consulting, development, SI projects. Date format is `YYYYMMDDHHMM` as an integer. Search window defaults to 7 days, controlled by `days` parameter passed through from MCP tool → internal function → `get_date_range(days)`. Results auto-filter to only show bids where deadline > now.
+Both only search "Service" (용역) type bids — consulting, development, SI projects. Search window defaults to 7 days, controlled by `days` parameter. `get_date_chunks(days, chunk_size=15)` splits the range into chunks and results are merged.
+
+All results are returned regardless of deadline status. `is_bid_open()` is used only for display — each item shows `✅ 진행중` or `🔴 마감` next to the deadline.
+
+`is_bid_open()` handles multiple date formats from the API: `YYYYMMDDHHMM`, `YYYY-MM-DD HH:MM:SS`, `YYYY-MM-DD HH:MM`, `YYYYMMDD`.
 
 The API response nests items at `response.body.items` — the value may be a `list`, `dict` with an `"item"` key (single result), or a string `"null"`. All three cases are handled in both search functions.
 
@@ -78,11 +76,11 @@ ZIP files use `select_best_file_from_zip()` to pick one file by priority: filena
 
 ### MCP Tools
 
-- `get_bids_by_keyword(keyword, days=7)` — 20 results each from both endpoints, returns formatted markdown
-- `recommend_bids_for_dept(keyword, department_profile, days=7)` — 30 results each, prepends LLM analysis instructions inline in the returned string
+- `get_bids_by_keyword(keyword, days=7)` — 20 results per chunk from both endpoints, returns formatted markdown with open/closed status
+- `recommend_bids_for_dept(keyword, department_profile, days=7)` — 30 results per chunk from both endpoints, prepends LLM analysis instructions inline in the returned string
 - `analyze_bid_detail(file_url, filename, department_profile?)` — downloads and extracts file text; if `department_profile` provided, prepends strategic analysis prompts
 
-`days` 파라미터는 두 검색 도구에 공통 적용. 기본값 7로 하위 호환성 유지. 특정 공고 분석 시 `days=30~90` 등으로 확장.
+`days` 파라미터는 두 검색 도구에 공통 적용. 기본값 7로 하위 호환성 유지. 특정 공고 분석 시 `days=30~90` 등으로 확장. 내부적으로 15일 단위로 청크 분할하여 API 제한 우회.
 
 ### No Test Suite
 

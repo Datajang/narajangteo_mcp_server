@@ -64,21 +64,40 @@ def get_date_range(days: int = 7) -> tuple[int, int]:
     return start_dt_int, end_dt_int
 
 
+def get_date_chunks(days: int, chunk_size: int = 15) -> list[tuple[int, int]]:
+    """
+    Split date range into chunks to work around API date range limits.
+    Returns list of (start, end) tuples in YYYYMMDDHHMM format as integers.
+    """
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+
+    chunks = []
+    chunk_start = start_date
+    while chunk_start < end_date:
+        chunk_end = min(chunk_start + timedelta(days=chunk_size), end_date)
+        chunks.append((
+            int(chunk_start.strftime("%Y%m%d0000")),
+            int(chunk_end.strftime("%Y%m%d2359")),
+        ))
+        chunk_start = chunk_end + timedelta(days=1)
+    return chunks
+
+
 def is_bid_open(close_datetime_str: str) -> bool:
     """
     Check if bid deadline is in the future.
-
-    Args:
-        close_datetime_str: Deadline in YYYYMMDDHHMM format
-
-    Returns:
-        True if bid is still open, False if closed
+    Handles multiple date formats returned by the API.
     """
-    try:
-        close_dt = datetime.strptime(close_datetime_str, "%Y%m%d%H%M")
-        return close_dt > datetime.now()
-    except:
+    if not close_datetime_str or close_datetime_str == "N/A":
         return True
+    for fmt in ("%Y%m%d%H%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y%m%d"):
+        try:
+            close_dt = datetime.strptime(close_datetime_str.strip(), fmt)
+            return close_dt > datetime.now()
+        except ValueError:
+            continue
+    return True
 
 
 def filter_proposal_files(item: dict) -> list[tuple[str, str]]:
@@ -132,91 +151,77 @@ async def search_bids_by_keyword(keyword: str, service_key: str, days: int = 7) 
     else:
         keyword = keyword.encode('utf-8', errors='replace').decode('utf-8')
 
-    start_date, end_date = get_date_range(days)
-    start_date_str = str(start_date)[:8]
-    end_date_str = str(end_date)[:8]
+    date_chunks = get_date_chunks(days)
+    start_date_str = str(date_chunks[0][0])[:8]
+    end_date_str = str(date_chunks[-1][1])[:8]
 
-    # Regular Bid Notices
-    bid_params = {
-        "ServiceKey": service_key,
-        "type": "json",
-        "inqryDiv": "1",
-        "inqryBgnDt": start_date,
-        "inqryEndDt": end_date,
-        "bidNtceNm": keyword,
-        "numOfRows": "20",
-        "pageNo": "1"
-    }
     bid_url = f"{BASE_URL}/{ENDPOINT}"
+    prespec_url = f"{BASE_URL}/{PRESPEC_ENDPOINT}"
 
     open_bids = []
     bid_total = 0
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            bid_response = await client.get(bid_url, params=bid_params)
-            bid_response.raise_for_status()
-            bid_data = bid_response.json()
-
-        bid_header = bid_data.get("response", {}).get("header", {})
-        if bid_header.get("resultCode") == "00":
-            bid_body = bid_data.get("response", {}).get("body", {})
-            bid_items = bid_body.get("items")
-            bid_total = bid_body.get("totalCount", 0)
-
-            if bid_items and not isinstance(bid_items, str):
-                if isinstance(bid_items, list):
-                    item_list = bid_items
-                elif isinstance(bid_items, dict):
-                    item_list = bid_items.get("item", [])
-                    if isinstance(item_list, dict):
-                        item_list = [item_list]
-                else:
-                    item_list = []
-
-                open_bids = [item for item in item_list if is_bid_open(item.get("bidClseDt", ""))]
-    except Exception as e:
-        logger.error(f"Error fetching bid notices: {e}")
-
-    # Preliminary Specifications
-    prespec_params = {
-        "ServiceKey": service_key,
-        "type": "json",
-        "inqryDiv": "1",
-        "inqryBgnDt": start_date,
-        "inqryEndDt": end_date,
-        "bfSpecNm": keyword,
-        "numOfRows": "20",
-        "pageNo": "1"
-    }
-    prespec_url = f"{BASE_URL}/{PRESPEC_ENDPOINT}"
-
     open_prespecs = []
     prespec_total = 0
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            prespec_response = await client.get(prespec_url, params=prespec_params)
-            prespec_response.raise_for_status()
-            prespec_data = prespec_response.json()
 
-        prespec_header = prespec_data.get("response", {}).get("header", {})
-        if prespec_header.get("resultCode") == "00":
-            prespec_body = prespec_data.get("response", {}).get("body", {})
-            prespec_items = prespec_body.get("items")
-            prespec_total = prespec_body.get("totalCount", 0)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for chunk_start, chunk_end in date_chunks:
+            # Regular Bid Notices
+            try:
+                bid_params = {
+                    "ServiceKey": service_key,
+                    "type": "json",
+                    "inqryDiv": "1",
+                    "inqryBgnDt": chunk_start,
+                    "inqryEndDt": chunk_end,
+                    "bidNtceNm": keyword,
+                    "numOfRows": "20",
+                    "pageNo": "1"
+                }
+                bid_response = await client.get(bid_url, params=bid_params)
+                bid_response.raise_for_status()
+                bid_data = bid_response.json()
+                bid_header = bid_data.get("response", {}).get("header", {})
+                if bid_header.get("resultCode") == "00":
+                    bid_body = bid_data.get("response", {}).get("body", {})
+                    bid_items = bid_body.get("items")
+                    bid_total += bid_body.get("totalCount", 0)
+                    if bid_items and not isinstance(bid_items, str):
+                        if isinstance(bid_items, list):
+                            open_bids.extend(bid_items)
+                        elif isinstance(bid_items, dict):
+                            item = bid_items.get("item", [])
+                            open_bids.extend([item] if isinstance(item, dict) else item)
+            except Exception as e:
+                logger.error(f"Error fetching bid notices (chunk {chunk_start}-{chunk_end}): {e}")
 
-            if prespec_items and not isinstance(prespec_items, str):
-                if isinstance(prespec_items, list):
-                    item_list = prespec_items
-                elif isinstance(prespec_items, dict):
-                    item_list = prespec_items.get("item", [])
-                    if isinstance(item_list, dict):
-                        item_list = [item_list]
-                else:
-                    item_list = []
-
-                open_prespecs = [item for item in item_list if is_bid_open(item.get("opnEndDt", ""))]
-    except Exception as e:
-        logger.error(f"Error fetching pre-specs: {e}")
+            # Preliminary Specifications
+            try:
+                prespec_params = {
+                    "ServiceKey": service_key,
+                    "type": "json",
+                    "inqryDiv": "1",
+                    "inqryBgnDt": chunk_start,
+                    "inqryEndDt": chunk_end,
+                    "bfSpecNm": keyword,
+                    "numOfRows": "20",
+                    "pageNo": "1"
+                }
+                prespec_response = await client.get(prespec_url, params=prespec_params)
+                prespec_response.raise_for_status()
+                prespec_data = prespec_response.json()
+                prespec_header = prespec_data.get("response", {}).get("header", {})
+                if prespec_header.get("resultCode") == "00":
+                    prespec_body = prespec_data.get("response", {}).get("body", {})
+                    prespec_items = prespec_body.get("items")
+                    prespec_total += prespec_body.get("totalCount", 0)
+                    if prespec_items and not isinstance(prespec_items, str):
+                        if isinstance(prespec_items, list):
+                            open_prespecs.extend(prespec_items)
+                        elif isinstance(prespec_items, dict):
+                            item = prespec_items.get("item", [])
+                            open_prespecs.extend([item] if isinstance(item, dict) else item)
+            except Exception as e:
+                logger.error(f"Error fetching pre-specs (chunk {chunk_start}-{chunk_end}): {e}")
 
     if not open_bids and not open_prespecs:
         return f"📭 No bid notices or preliminary specifications found for keyword: '{keyword}' in the last {days} days."
@@ -226,7 +231,7 @@ async def search_bids_by_keyword(keyword: str, service_key: str, days: int = 7) 
 
     # Section 1: Regular Bid Notices
     results.append(f"🔍 **일반 입찰 공고 (Regular Bids)**\n")
-    results.append(f"Found {bid_total} bid notice(s) total, {len(open_bids)} still open\n")
+    results.append(f"Found {bid_total} bid notice(s) total, {len(open_bids)} retrieved\n")
     results.append(f"📅 Search period: {start_date_str} ~ {end_date_str} (last {days} days)\n")
     results.append("=" * 80 + "\n")
 
@@ -246,11 +251,12 @@ async def search_bids_by_keyword(keyword: str, service_key: str, days: int = 7) 
             except (ValueError, TypeError):
                 budget_formatted = "미공개"
 
+            status = "✅ 진행중" if is_bid_open(item.get("bidClseDt", "")) else "🔴 마감"
             results.append(f"\n## {idx}. {bid_name}\n")
             results.append(f"   📌 공고번호: {bid_no}\n")
             results.append(f"   🏢 수요기관: {demand_org}\n")
             results.append(f"   💰 예산: {budget_formatted}\n")
-            results.append(f"   ⏰ 마감일시: {deadline}\n")
+            results.append(f"   ⏰ 마감일시: {deadline} ({status})\n")
 
             proposal_files = filter_proposal_files(item)
             if proposal_files:
@@ -266,7 +272,7 @@ async def search_bids_by_keyword(keyword: str, service_key: str, days: int = 7) 
     # Section 2: Preliminary Specifications
     results.append("\n" + "=" * 80 + "\n")
     results.append(f"📋 **사전규격 공고 (Preliminary Specifications)**\n")
-    results.append(f"Found {prespec_total} pre-spec(s) total, {len(open_prespecs)} still open\n")
+    results.append(f"Found {prespec_total} pre-spec(s) total, {len(open_prespecs)} retrieved\n")
     results.append("=" * 80 + "\n")
 
     if open_prespecs:
@@ -282,11 +288,12 @@ async def search_bids_by_keyword(keyword: str, service_key: str, days: int = 7) 
             except (ValueError, TypeError):
                 budget_formatted = "미공개"
 
+            status = "✅ 진행중" if is_bid_open(item.get("opnEndDt", "")) else "🔴 마감"
             results.append(f"\n## {idx}. {spec_name}\n")
             results.append(f"   📌 사전규격번호: {spec_no}\n")
             results.append(f"   🏢 발주기관: {agency}\n")
             results.append(f"   💰 배정예산: {budget_formatted}\n")
-            results.append(f"   ⏰ 의견마감일시: {deadline}\n")
+            results.append(f"   ⏰ 의견마감일시: {deadline} ({status})\n")
 
             proposal_files = filter_proposal_files(item)
             if proposal_files:
@@ -326,89 +333,74 @@ async def search_bids_for_dept(keyword: str, department_profile: str, service_ke
     else:
         keyword = keyword.encode('utf-8', errors='replace').decode('utf-8')
 
-    start_date, end_date = get_date_range(days)
-
-    # Regular Bid Notices (30)
-    bid_params = {
-        "ServiceKey": service_key,
-        "type": "json",
-        "inqryDiv": "1",
-        "inqryBgnDt": start_date,
-        "inqryEndDt": end_date,
-        "bidNtceNm": keyword,
-        "numOfRows": "30",
-        "pageNo": "1"
-    }
+    date_chunks = get_date_chunks(days)
     bid_url = f"{BASE_URL}/{ENDPOINT}"
+    prespec_url = f"{BASE_URL}/{PRESPEC_ENDPOINT}"
 
     open_bids = []
     bid_total = 0
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            bid_response = await client.get(bid_url, params=bid_params)
-            bid_response.raise_for_status()
-            bid_data = bid_response.json()
-
-        bid_header = bid_data.get("response", {}).get("header", {})
-        if bid_header.get("resultCode") == "00":
-            bid_body = bid_data.get("response", {}).get("body", {})
-            bid_items = bid_body.get("items")
-            bid_total = bid_body.get("totalCount", 0)
-
-            if bid_items and not isinstance(bid_items, str):
-                if isinstance(bid_items, list):
-                    item_list = bid_items
-                elif isinstance(bid_items, dict):
-                    item_list = bid_items.get("item", [])
-                    if isinstance(item_list, dict):
-                        item_list = [item_list]
-                else:
-                    item_list = []
-
-                open_bids = [item for item in item_list if is_bid_open(item.get("bidClseDt", ""))]
-    except Exception as e:
-        logger.error(f"Error in dept search (bids): {e}")
-
-    # Preliminary Specifications (30)
-    prespec_params = {
-        "ServiceKey": service_key,
-        "type": "json",
-        "inqryDiv": "1",
-        "inqryBgnDt": start_date,
-        "inqryEndDt": end_date,
-        "bfSpecNm": keyword,
-        "numOfRows": "30",
-        "pageNo": "1"
-    }
-    prespec_url = f"{BASE_URL}/{PRESPEC_ENDPOINT}"
-
     open_prespecs = []
     prespec_total = 0
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            prespec_response = await client.get(prespec_url, params=prespec_params)
-            prespec_response.raise_for_status()
-            prespec_data = prespec_response.json()
 
-        prespec_header = prespec_data.get("response", {}).get("header", {})
-        if prespec_header.get("resultCode") == "00":
-            prespec_body = prespec_data.get("response", {}).get("body", {})
-            prespec_items = prespec_body.get("items")
-            prespec_total = prespec_body.get("totalCount", 0)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for chunk_start, chunk_end in date_chunks:
+            # Regular Bid Notices (30)
+            try:
+                bid_params = {
+                    "ServiceKey": service_key,
+                    "type": "json",
+                    "inqryDiv": "1",
+                    "inqryBgnDt": chunk_start,
+                    "inqryEndDt": chunk_end,
+                    "bidNtceNm": keyword,
+                    "numOfRows": "30",
+                    "pageNo": "1"
+                }
+                bid_response = await client.get(bid_url, params=bid_params)
+                bid_response.raise_for_status()
+                bid_data = bid_response.json()
+                bid_header = bid_data.get("response", {}).get("header", {})
+                if bid_header.get("resultCode") == "00":
+                    bid_body = bid_data.get("response", {}).get("body", {})
+                    bid_items = bid_body.get("items")
+                    bid_total += bid_body.get("totalCount", 0)
+                    if bid_items and not isinstance(bid_items, str):
+                        if isinstance(bid_items, list):
+                            open_bids.extend(bid_items)
+                        elif isinstance(bid_items, dict):
+                            item = bid_items.get("item", [])
+                            open_bids.extend([item] if isinstance(item, dict) else item)
+            except Exception as e:
+                logger.error(f"Error in dept search (bids, chunk {chunk_start}-{chunk_end}): {e}")
 
-            if prespec_items and not isinstance(prespec_items, str):
-                if isinstance(prespec_items, list):
-                    item_list = prespec_items
-                elif isinstance(prespec_items, dict):
-                    item_list = prespec_items.get("item", [])
-                    if isinstance(item_list, dict):
-                        item_list = [item_list]
-                else:
-                    item_list = []
-
-                open_prespecs = [item for item in item_list if is_bid_open(item.get("opnEndDt", ""))]
-    except Exception as e:
-        logger.error(f"Error in dept search (prespecs): {e}")
+            # Preliminary Specifications (30)
+            try:
+                prespec_params = {
+                    "ServiceKey": service_key,
+                    "type": "json",
+                    "inqryDiv": "1",
+                    "inqryBgnDt": chunk_start,
+                    "inqryEndDt": chunk_end,
+                    "bfSpecNm": keyword,
+                    "numOfRows": "30",
+                    "pageNo": "1"
+                }
+                prespec_response = await client.get(prespec_url, params=prespec_params)
+                prespec_response.raise_for_status()
+                prespec_data = prespec_response.json()
+                prespec_header = prespec_data.get("response", {}).get("header", {})
+                if prespec_header.get("resultCode") == "00":
+                    prespec_body = prespec_data.get("response", {}).get("body", {})
+                    prespec_items = prespec_body.get("items")
+                    prespec_total += prespec_body.get("totalCount", 0)
+                    if prespec_items and not isinstance(prespec_items, str):
+                        if isinstance(prespec_items, list):
+                            open_prespecs.extend(prespec_items)
+                        elif isinstance(prespec_items, dict):
+                            item = prespec_items.get("item", [])
+                            open_prespecs.extend([item] if isinstance(item, dict) else item)
+            except Exception as e:
+                logger.error(f"Error in dept search (prespecs, chunk {chunk_start}-{chunk_end}): {e}")
 
     if not open_bids and not open_prespecs:
         return f"📭 No bid notices or preliminary specifications found for keyword: '{keyword}'"
@@ -460,11 +452,12 @@ async def search_bids_for_dept(keyword: str, department_profile: str, service_ke
         except (ValueError, TypeError):
             budget_formatted = "미공개"
 
+        status = "✅ 진행중" if is_bid_open(item.get("bidClseDt", "")) else "🔴 마감"
         results.append(f"### [BID-{idx}] {bid_name}")
         results.append(f"- 공고번호: {bid_no}")
         results.append(f"- 수요기관: {demand_org}")
         results.append(f"- 예산: {budget_formatted}")
-        results.append(f"- 마감일시: {deadline}")
+        results.append(f"- 마감일시: {deadline} ({status})")
         if bid_url:
             results.append(f"- 공고 URL: {bid_url}")
 
@@ -489,11 +482,12 @@ async def search_bids_for_dept(keyword: str, department_profile: str, service_ke
         except (ValueError, TypeError):
             budget_formatted = "미공개"
 
+        status = "✅ 진행중" if is_bid_open(item.get("opnEndDt", "")) else "🔴 마감"
         results.append(f"### [PRESPEC-{idx}] {spec_name}")
         results.append(f"- 사전규격번호: {spec_no}")
         results.append(f"- 발주기관: {agency}")
         results.append(f"- 배정예산: {budget_formatted}")
-        results.append(f"- 의견마감일시: {deadline}")
+        results.append(f"- 의견마감일시: {deadline} ({status})")
 
         proposal_files = filter_proposal_files(item)
         if proposal_files:

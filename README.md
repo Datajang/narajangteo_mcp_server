@@ -6,7 +6,7 @@ MCP server for searching Korean government procurement bid notices from G2B (나
 
 - 🔍 **통합 검색**: 용역 입찰공고 + 사전규격을 키워드로 검색 (검색 기간 자유 설정, 기본 7일)
 - 💰 **예산 정보**: 모든 검색 결과에 예산 금액 표시
-- 📅 **자동 필터링**: 마감되지 않은 공고만 자동 필터링
+- 📅 **마감 상태 표시**: 모든 공고를 표시하고 `✅ 진행중` / `🔴 마감` 상태를 명확히 구분
 - 📎 **파일 추출**: 제안요청서(RFP) 자동 다운로드 및 텍스트 추출
 - 🗂️ **스마트 필터링**: 제안요청서/과업지시서 파일만 자동 선별
 - 🏢 **맞춤형 추천**: 부서 프로필 기반 유연한 추천 (Top N 또는 전체 목록)
@@ -211,7 +211,7 @@ npx @modelcontextprotocol/inspector uv --directory . run python -m nara_server.s
 - 공고번호 (bidNtceNo)
 - 수요기관 (dminsttNm)
 - 예산 (bdgtAmt / presmptPrce)
-- 마감일시 (bidClseDt) - 마감되지 않은 공고만
+- 마감일시 (bidClseDt) + 진행중/마감 상태 표시
 - 제안요청서 파일 (제안요청서/제안 키워드 포함 파일만 자동 필터링)
 
 **사전규격:**
@@ -297,26 +297,26 @@ AI 관련 정부 프로젝트 입찰 공고를 최근 30일 기준으로 찾아�
 Q: 나라장터에서 "시스템 개발" 키워드로 입찰공고를 검색해줘
 
 A: 🔍 **일반 입찰 공고 (Regular Bids)**
-   Found 15 bid notice(s) total, 8 still open
+   Found 15 bid notice(s) total, 15 retrieved
    📅 Search period: 20260116 ~ 20260123
 
    ## 1. AI 기반 고객관리 시스템 개발 용역
       📌 공고번호: 20260112345-00
       🏢 수요기관: 서울시청
       💰 예산: 150,000,000원
-      ⏰ 마감일시: 202601201430
+      ⏰ 마감일시: 202601201430 (✅ 진행중)
       📎 제안요청서:
          - 제안요청서_AI시스템.hwp: [URL]
 
    ================================================================================
    📋 **사전규격 공고 (Preliminary Specifications)**
-   Found 3 pre-spec(s) total, 2 still open
+   Found 3 pre-spec(s) total, 3 retrieved
 
    ## 1. 고객관리 플랫폼 사전규격
       📌 사전규격번호: PRE20260101-01
       🏢 발주기관: 경기도청
       💰 배정예산: 80,000,000원
-      ⏰ 의견마감일시: 202601251700
+      ⏰ 의견마감일시: 202601251700 (🔴 마감)
       📎 제안요청서:
          - 제안요청서_플랫폼.hwp: [URL]
 ```
@@ -389,12 +389,12 @@ A: 📄 Bid Document Analysis
 
 ### 2. No Results Found
 
-**원인**: 검색 결과가 없거나, 해당 기간에 해당 키워드의 진행 중인 공고가 없습니다.
+**원인**: 해당 기간에 해당 키워드의 공고가 없습니다.
 
 **해결 방법:**
 - 다른 키워드로 검색 시도 (더 일반적인 키워드 사용)
 - `days` 파라미터를 늘려 검색 기간 확장 (예: days=30, days=60)
-- 마감된 공고일 가능성 확인 (나라장터 웹사이트에서 직접 확인)
+- 마감된 공고는 `🔴 마감` 표시와 함께 그대로 표시되므로 별도 확인 불필요
 
 ### 3. API Error (Code: 20 - Access Denied)
 
@@ -429,8 +429,9 @@ A: 📄 Bid Document Analysis
   - 사전규격: `getBfSpecRgstSttusListInfoServcPPSSrch`
 - **공고 유형**: 용역 (Service) - 컨설팅, 개발, SI 프로젝트
 - **검색 기간**: 기본 7일, `days` 파라미터로 자유 설정 가능 (예: 30, 60, 90일)
+- **날짜 청크 분할**: API 날짜 범위 제한(~15일) 자동 우회, 내부적으로 15일 단위 분할 후 결과 병합
 - **필터링**:
-  - 마감일시 기준 자동 필터링 (진행 중인 공고만 표시)
+  - 모든 공고 표시, 마감일시 옆에 `✅ 진행중` / `🔴 마감` 상태 표시
   - 제안요청서 파일 자동 선별 (제안요청서/제안 키워드 포함 파일만)
 
 **참고:**
@@ -443,7 +444,6 @@ A: 📄 Bid Document Analysis
 - **Python**: 3.10+
 - **MCP Framework**:
   - `mcp>=1.15.0` - Model Context Protocol SDK
-  - `smithery>=0.4.2` - Smithery CLI for MCP server development
 - **HTTP Client**: `httpx>=0.27.0` - Async HTTP requests
 - **File Extraction**:
   - `langchain-teddynote>=0.3.9` - Enhanced HWP extraction (primary, with zlib compression support)
@@ -464,10 +464,9 @@ narajangteo_mcp_server/
 ├── src/
 │   └── nara_server/
 │       ├── __init__.py          # Package initialization
-│       ├── server.py             # Main MCP server with Smithery
+│       ├── server.py             # Main MCP server (STDIO transport)
 │       └── file_extractor.py     # Multi-format file text extraction
 ├── pyproject.toml                # Python project metadata & dependencies
-├── smithery.yaml                 # Smithery deployment configuration
 ├── .env                          # Environment variables (local)
 ├── README.md                     # This file
 ├── CLAUDE.md                     # Developer guide
