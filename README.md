@@ -22,8 +22,9 @@ Get started in 3 steps:
    pip install nara-mcp-server
    ```
 
-2. **Get API key**
-   Visit [공공데이터포털](https://www.data.go.kr/) and search for "조달청_나라장터 입찰공고정보서비스"
+2. **Get API keys** (2개 필요)
+   - [공공데이터포털](https://www.data.go.kr/) 에서 **"조달청_나라장터 입찰공고정보서비스"** 활용신청 → `NARA_API_KEY`
+   - 동일 포털에서 **"조달청_나라장터 사전규격정보서비스(HrcspSsstndrdInfoService)"** 활용신청 → `NARA_PRESPEC_API_KEY`
 
 3. **Configure Claude Desktop**
    Add to `claude_desktop_config.json`:
@@ -40,7 +41,8 @@ Get started in 3 steps:
            "nara-server"
          ],
          "env": {
-           "NARA_API_KEY": "발급받은 API KEY",
+           "NARA_API_KEY": "입찰공고 API KEY",
+           "NARA_PRESPEC_API_KEY": "사전규격 API KEY",
            "UV_LINK_MODE": "copy"
          }
        }
@@ -53,16 +55,19 @@ Get started in 3 steps:
 
 ## Prerequisites
 
-### 1. API 키 발급 (필수)
+### 1. API 키 발급 (필수 — 2가지)
 
-나라장터 API를 사용하려면 공공데이터포털에서 API 키를 발급받아야 합니다.
+나라장터 API는 **일반 입찰공고**와 **사전규격**이 별도 서비스로 분리되어 있어 각각 활용신청이 필요합니다.
 
-**발급 절차:**
+**① 입찰공고 API 키 (`NARA_API_KEY`)**
 1. [공공데이터포털](https://www.data.go.kr/) 접속 및 회원가입
-2. 검색창에 **"조달청_나라장터 입찰공고정보서비스"** 검색
-3. **"조달청_나라장터 입찰공고정보서비스"** 선택
-4. **활용신청** 클릭 (즉시 승인 또는 승인 대기)
-5. **마이페이지 > 개발계정** 에서 ServiceKey 확인 (일반 인증키 Decoding을 사용하면 됩니다.)
+2. **"조달청_나라장터 입찰공고정보서비스"** 검색 후 활용신청
+3. **마이페이지 > 개발계정** 에서 ServiceKey 확인 (일반 인증키 Decoding 사용)
+
+**② 사전규격 API 키 (`NARA_PRESPEC_API_KEY`)**
+1. 동일 포털에서 **"조달청_나라장터 사전규격정보서비스(HrcspSsstndrdInfoService)"** 검색 후 활용신청
+2. 승인 후 동일하게 ServiceKey 확인
+> 두 서비스의 키가 동일할 수도 있으나, 각각 활용신청이 완료되어야 정상 동작합니다.
 
 ### 2. Python 환경
 
@@ -98,7 +103,8 @@ Create a `.env` file in the project root:
 
 ```bash
 # .env
-NARA_API_KEY=your_service_key_from_data_go_kr
+NARA_API_KEY=입찰공고_서비스키
+NARA_PRESPEC_API_KEY=사전규격_서비스키
 ```
 
 The `.env` file is automatically loaded when running the server.
@@ -109,14 +115,12 @@ The `.env` file is automatically loaded when running the server.
 - **MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
 
-**Recommended: Using installed package**
-
 ```json
 {
   "mcpServers": {
     "nara-jangteo": {
       "command": "uvx",
-    "args": [
+      "args": [
         "--python",
         "3.11",
         "--from",
@@ -124,30 +128,8 @@ The `.env` file is automatically loaded when running the server.
         "nara-server"
       ],
       "env": {
-        "NARA_API_KEY": "발급받은 API KEY",
-        "UV_LINK_MODE": "copy"
-      }
-    }
-  }
-}
-```
-
-**Alternative: Using Python directly (if not installed globally)**
-
-```json
-{
-  "mcpServers": {
-    "nara-jangteo": {
-      "command": "uvx",
-    "args": [
-        "--python",
-        "3.11",
-        "--from",
-        "nara-mcp-server",
-        "nara-server"
-      ],
-      "env": {
-        "NARA_API_KEY": "발급받은 API KEY",
+        "NARA_API_KEY": "입찰공고 API KEY",
+        "NARA_PRESPEC_API_KEY": "사전규격 API KEY",
         "UV_LINK_MODE": "copy"
       }
     }
@@ -157,7 +139,8 @@ The `.env` file is automatically loaded when running the server.
 
 **중요 사항:**
 - PyPI 설치 시 `nara-server` 명령어가 자동으로 등록됩니다
-- `NARA_API_KEY`에 발급받은 ServiceKey 입력
+- `NARA_API_KEY` — 입찰공고 ServiceKey 입력
+- `NARA_PRESPEC_API_KEY` — 사전규격 ServiceKey 입력 (미설정 시 사전규격 검색 비활성화)
 - Claude Desktop 재시작 필요
 
 ### Other MCP Clients
@@ -172,25 +155,19 @@ For local development, create a `.env` file:
 
 ```bash
 # .env
-NARA_API_KEY=your_service_key_here
+NARA_API_KEY=입찰공고_서비스키
+NARA_PRESPEC_API_KEY=사전규격_서비스키
 ```
 
 The `.env` file is automatically loaded and **not tracked by git** (.gitignore).
 
-**Benefits:**
-- No need to set environment variables every time
-- Works across all terminals
-- Easier for MCP Inspector testing
-
 **Example workflow:**
 ```bash
-# 1. Copy example file
-cp .env.example .env
+# 1. .env 파일 생성 후 두 API 키 입력
+# NARA_API_KEY=your_bid_key
+# NARA_PRESPEC_API_KEY=your_prespec_key
 
-# 2. Edit .env and add your API key
-# NARA_API_KEY=your_actual_key
-
-# 3. Run MCP Inspector (no env setup needed!)
+# 2. Run MCP Inspector (no env setup needed!)
 npx @modelcontextprotocol/inspector uv --directory . run python -m nara_server.server
 ```
 
@@ -215,12 +192,12 @@ npx @modelcontextprotocol/inspector uv --directory . run python -m nara_server.s
 - 제안요청서 파일 (제안요청서/제안 키워드 포함 파일만 자동 필터링)
 
 **사전규격:**
-- 사전규격명 (bfSpecNm)
+- 품명/서비스명 (prdctClsfcNoNm)
 - 사전규격번호 (bfSpecRgstNo)
-- 발주기관 (ordInsttNm)
+- 발주기관 (orderInsttNm)
 - 배정예산 (asignBdgtAmt)
-- 의견마감일시 (opnEndDt)
-- 제안요청서 파일 (제안요청서/제안 키워드 포함 파일만 자동 필터링)
+- 의견마감일시 (opninRgstClseDt)
+- 규격문서 파일 URL (specDocFileUrl1~5)
 
 **예시 질문:**
 ```
@@ -312,13 +289,13 @@ A: 🔍 **일반 입찰 공고 (Regular Bids)**
    📋 **사전규격 공고 (Preliminary Specifications)**
    Found 3 pre-spec(s) total, 3 retrieved
 
-   ## 1. 고객관리 플랫폼 사전규격
+   ## 1. 📋 [사전규격] 고객관리 플랫폼 구축
       📌 사전규격번호: PRE20260101-01
       🏢 발주기관: 경기도청
       💰 배정예산: 80,000,000원
       ⏰ 의견마감일시: 202601251700 (🔴 마감)
-      📎 제안요청서:
-         - 제안요청서_플랫폼.hwp: [URL]
+      📎 규격문서:
+         - 규격문서 1: [URL]
 ```
 
 ### 맞춤형 추천
@@ -379,12 +356,13 @@ A: 📄 Bid Document Analysis
 
 ## Troubleshooting
 
-### 1. ValueError: NARA_API_KEY environment variable is required
+### 1. ValueError: NARA_API_KEY / NARA_PRESPEC_API_KEY not found
 
 **원인**: API 키가 환경변수로 설정되지 않았습니다.
 
 **해결 방법:**
-- Claude Desktop 설정 파일의 `env` 섹션에 `NARA_API_KEY` 추가
+- Claude Desktop 설정 파일의 `env` 섹션에 `NARA_API_KEY`와 `NARA_PRESPEC_API_KEY` 추가
+- 사전규격 키(`NARA_PRESPEC_API_KEY`) 미설정 시 사전규격 검색은 비활성화되지만 일반 입찰공고 검색은 계속 동작합니다
 - Claude Desktop 재시작
 
 ### 2. No Results Found
@@ -423,21 +401,20 @@ A: 📄 Bid Document Analysis
 ## API Information
 
 - **데이터 출처**: 조달청 나라장터 (Korea Public Procurement Service)
-- **API 서비스**: BidPublicInfoService
 - **엔드포인트**:
-  - 일반 입찰: `getBidPblancListInfoServcPPSSrch`
-  - 사전규격: `getBfSpecRgstSttusListInfoServcPPSSrch`
+  - 일반 입찰: `http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch`
+  - 사전규격: `http://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch`
+- **API 키**: 두 서비스 각각 공공데이터포털 활용신청 필요 (`NARA_API_KEY`, `NARA_PRESPEC_API_KEY`)
 - **공고 유형**: 용역 (Service) - 컨설팅, 개발, SI 프로젝트
 - **검색 기간**: 기본 7일, `days` 파라미터로 자유 설정 가능 (예: 30, 60, 90일)
 - **날짜 청크 분할**: API 날짜 범위 제한(~15일) 자동 우회, 내부적으로 15일 단위 분할 후 결과 병합
 - **필터링**:
   - 모든 공고 표시, 마감일시 옆에 `✅ 진행중` / `🔴 마감` 상태 표시
-  - 제안요청서 파일 자동 선별 (제안요청서/제안 키워드 포함 파일만)
+  - 사전규격 항목은 `📋 [사전규격]` 태그로 일반 입찰공고와 명확히 구분
 
 **참고:**
 - 물품 공고: 엔드포인트 변경 필요 (`getBidPblancListInfoThngPPSSrch`)
 - 공사 공고: 엔드포인트 변경 필요 (`getBidPblancListInfoCnstwkPPSSrch`)
-- 사전규격 검색: 별도 엔드포인트 사용, 파라미터명 차이 (`bidNtceNm` vs `bfSpecNm`)
 
 ## Technical Stack
 
@@ -485,12 +462,16 @@ cd narajangteo_mcp_server
 # Install in editable mode
 pip install -e .
 
-# Set environment variable
-export NARA_API_KEY="your_service_key_here"  # MacOS/Linux
-set NARA_API_KEY=your_service_key_here       # Windows
+# Set environment variables
+export NARA_API_KEY="your_bid_key"          # MacOS/Linux
+export NARA_PRESPEC_API_KEY="your_prespec_key"
+
+set NARA_API_KEY=your_bid_key               # Windows
+set NARA_PRESPEC_API_KEY=your_prespec_key
 
 # Or use .env file (recommended)
-echo "NARA_API_KEY=your_key" > .env
+echo "NARA_API_KEY=your_bid_key" > .env
+echo "NARA_PRESPEC_API_KEY=your_prespec_key" >> .env
 ```
 
 ### Running the server

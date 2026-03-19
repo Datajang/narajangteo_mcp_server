@@ -25,34 +25,43 @@ npx @modelcontextprotocol/inspector uv --directory . run python -m nara_server.s
 uv sync --extra dev
 ```
 
-API key must be set before running:
+API keys must be set before running:
 ```bash
 # Via .env file (recommended for local dev)
-echo "NARA_API_KEY=your_key" > .env
+echo "NARA_API_KEY=your_key" >> .env
+echo "NARA_PRESPEC_API_KEY=your_prespec_key" >> .env
 
-# Or environment variable
-set NARA_API_KEY=your_key   # Windows
-export NARA_API_KEY=your_key  # Linux/Mac
+# Or environment variables
+set NARA_API_KEY=your_key          # Windows
+set NARA_PRESPEC_API_KEY=your_key  # Windows
+export NARA_API_KEY=your_key          # Linux/Mac
+export NARA_PRESPEC_API_KEY=your_key  # Linux/Mac
 ```
+
+Two separate API keys are required:
+- `NARA_API_KEY` — for regular bid notices (입찰공고), registered at data.go.kr under "나라장터 입찰정보"
+- `NARA_PRESPEC_API_KEY` — for pre-spec notices (사전규격), separate service at `http://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/`
 
 ## Architecture
 
 ### Transport
 
-STDIO only (`main()` → `mcp_server.run(transport="stdio")`). Used by Claude Desktop and direct Python invocation. API key comes from `NARA_API_KEY` env var or `.env` file.
+STDIO only (`main()` → `mcp_server.run(transport="stdio")`). Used by Claude Desktop and direct Python invocation. API keys come from `NARA_API_KEY` and `NARA_PRESPEC_API_KEY` env vars or `.env` file.
 
-`get_api_key()` resolves: env var → raises `ValueError`.
+`get_api_key()` resolves: env var → raises `ValueError`. Same pattern for `get_prespec_api_key()`.
 
 ### Dual-API Search with Date Chunking
 
 Every search hits **two separate endpoints** sequentially, split into **15-day chunks** to work around the API's date range limit (requests spanning >~15 days return 404).
 
-| Endpoint | Type | Keyword param | Deadline field | Budget field |
-|---|---|---|---|---|
-| `getBidPblancListInfoServcPPSSrch` | Regular bids (입찰공고) | `bidNtceNm` | `bidClseDt` | `bdgtAmt` / `presmptPrce` |
-| `getBfSpecRgstSttusListInfoServcPPSSrch` | Pre-specs (사전규격) | `bfSpecNm` | `opnEndDt` | `asignBdgtAmt` |
+| Endpoint | Base URL | Type | Keyword param | Deadline field | Budget field |
+|---|---|---|---|---|---|
+| `getBidPblancListInfoServcPPSSrch` | `http://apis.data.go.kr/1230000/ad/BidPublicInfoService` | Regular bids (입찰공고) | `bidNtceNm` | `bidClseDt` | `bdgtAmt` / `presmptPrce` |
+| `getPublicPrcureThngInfoServcPPSSrch` | `http://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService` | Pre-specs (사전규격) | `prdctClsfcNoNm` | `opninRgstClseDt` | `asignBdgtAmt` |
 
-Base URL: `http://apis.data.go.kr/1230000/ad/BidPublicInfoService`
+Pre-spec response file URLs are in `specDocFileUrl1~5` fields (no filename field). Extracted by `filter_spec_doc_files()`.
+
+Regular bid base URL: `http://apis.data.go.kr/1230000/ad/BidPublicInfoService`
 
 Both only search "Service" (용역) type bids — consulting, development, SI projects. Search window defaults to 7 days, controlled by `days` parameter. `get_date_chunks(days, chunk_size=15)` splits the range into chunks and results are merged.
 
