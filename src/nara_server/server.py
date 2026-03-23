@@ -262,6 +262,13 @@ async def search_bids_by_keyword(keyword: str, service_key: str, prespec_service
     if not open_bids and not open_prespecs and not prespec_errors:
         return f"📭 No bid notices or preliminary specifications found for keyword: '{keyword}' in the last {days} days."
 
+    # Build pre-spec lookup by registration number for cross-referencing
+    prespec_docs_by_no = {
+        item["bfSpecRgstNo"]: filter_spec_doc_files(item)
+        for item in open_prespecs
+        if item.get("bfSpecRgstNo") and filter_spec_doc_files(item)
+    }
+
     # Format Results
     results = []
 
@@ -295,10 +302,21 @@ async def search_bids_by_keyword(keyword: str, service_key: str, prespec_service
             results.append(f"   ⏰ 마감일시: {deadline} ({status})\n")
 
             proposal_files = filter_proposal_files(item)
+            bf_spec_no = item.get("bfSpecRgstNo", "")
+            prespec_files = []
+            if not proposal_files and bf_spec_no:
+                prespec_files = prespec_docs_by_no.get(bf_spec_no, [])
+
             if proposal_files:
                 results.append(f"   📎 제안요청서:\n")
                 for url, filename in proposal_files:
                     results.append(f"      - {filename}: {url}\n")
+            elif prespec_files:
+                results.append(f"   📋 제안요청정보 (사전규격 {bf_spec_no}):\n")
+                for url, label in prespec_files:
+                    results.append(f"      - {label}: {url}\n")
+            elif bf_spec_no:
+                results.append(f"   📎 제안요청서: 없음 (사전규격 {bf_spec_no} 참조)\n")
             else:
                 results.append(f"   📎 제안요청서: 없음\n")
             results.append("\n" + "-" * 80 + "\n")
@@ -458,6 +476,13 @@ async def search_bids_for_dept(keyword: str, department_profile: str, service_ke
     if not open_bids and not open_prespecs and not prespec_errors:
         return f"📭 No bid notices or preliminary specifications found for keyword: '{keyword}'"
 
+    # Build pre-spec lookup by registration number for cross-referencing
+    prespec_docs_by_no = {
+        item["bfSpecRgstNo"]: filter_spec_doc_files(item)
+        for item in open_prespecs
+        if item.get("bfSpecRgstNo") and filter_spec_doc_files(item)
+    }
+
     # Format Results with LLM Instructions
     results = [
         f"🎯 Department-Filtered Integrated Search Results",
@@ -516,10 +541,21 @@ async def search_bids_for_dept(keyword: str, department_profile: str, service_ke
             results.append(f"- 공고 URL: {bid_url}")
 
         proposal_files = filter_proposal_files(item)
+        bf_spec_no = item.get("bfSpecRgstNo", "")
+        prespec_files = []
+        if not proposal_files and bf_spec_no:
+            prespec_files = prespec_docs_by_no.get(bf_spec_no, [])
+
         if proposal_files:
             results.append(f"- 제안요청서:")
             for url, filename in proposal_files:
                 results.append(f"  - {filename}: {url}")
+        elif prespec_files:
+            results.append(f"- 제안요청정보 (사전규격 {bf_spec_no}):")
+            for url, label in prespec_files:
+                results.append(f"  - {label}: {url}")
+        elif bf_spec_no:
+            results.append(f"- 제안요청서: 없음 (사전규격 {bf_spec_no} 참조)")
         results.append("")
 
     # Section 2: Preliminary Specifications

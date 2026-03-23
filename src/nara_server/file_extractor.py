@@ -450,8 +450,15 @@ async def extract_text_from_url(url: str, filename: str = "") -> str:
     try:
         file_bytes, detected_filename = await download_file(url)
 
-        # Use provided filename or detected one
-        final_filename = filename if filename else detected_filename
+        # Use provided filename if it has a recognized extension, otherwise use detected filename
+        recognized_exts = {'.hwp', '.hwpx', '.pdf', '.docx', '.xlsx', '.xls', '.zip'}
+        provided_ext = Path(filename).suffix.lower() if filename else ''
+        if filename and provided_ext in recognized_exts:
+            final_filename = filename
+        elif detected_filename:
+            final_filename = detected_filename
+        else:
+            final_filename = filename
 
         if not final_filename:
             return f"Text extraction unavailable: Could not determine file type. Manual link: {url}"
