@@ -35,6 +35,7 @@ if sys.platform == 'win32':
 # API Configuration
 BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
 ENDPOINT = "getBidPblancListInfoServcPPSSrch"
+EORDER_ATCH_ENDPOINT = "getBidPblancListInfoEorderAtchFileInfo"
 PRESPEC_API_URL = "http://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch"
 
 
@@ -145,6 +146,50 @@ def filter_spec_doc_files(item: dict) -> list[tuple[str, str]]:
         if url:
             files.append((url, f"규격문서 {i}"))
     return files
+
+
+async def fetch_eorder_files(
+    client: httpx.AsyncClient, bid_ntce_no: str, service_key: str
+) -> list[tuple[str, str]]:
+    """
+    bidNtceNo로 e발주 첨부파일 조회 (나라장터 제안요청정보 탭).
+    inqryDiv=2 + bidNtceNo 조합으로 호출.
+    eorderDocDivNm 또는 파일명에 '제안요청' 포함된 파일만 반환.
+    Returns list of (url, filename) tuples.
+    """
+    url = f"{BASE_URL}/{EORDER_ATCH_ENDPOINT}"
+    params = {
+        "ServiceKey": service_key,
+        "type": "json",
+        "inqryDiv": "2",
+        "bidNtceNo": bid_ntce_no,
+        "numOfRows": "10",
+        "pageNo": "1",
+    }
+    try:
+        resp = await client.get(url, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("response", {}).get("header", {}).get("resultCode") != "00":
+            return []
+        items = data.get("response", {}).get("body", {}).get("items")
+        if not items or isinstance(items, str):
+            return []
+        if isinstance(items, dict):
+            raw = items.get("item")
+            items = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
+        result = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            fname = it.get("eorderAtchFileNm", "")
+            furl = it.get("eorderAtchFileUrl", "")
+            doc_div = it.get("eorderDocDivNm", "")
+            if fname and furl and ("제안요청" in doc_div or "제안요청" in fname):
+                result.append((furl, fname))
+        return result
+    except Exception:
+        return []
 
 
 async def search_bids_by_keyword(keyword: str, service_key: str, prespec_service_key: str, days: int = 7) -> str:
@@ -259,6 +304,15 @@ async def search_bids_by_keyword(keyword: str, service_key: str, prespec_service
                         prespec_errors.append(str(e))
                     logger.error(f"Error fetching pre-specs (chunk {chunk_start}-{chunk_end}): {e}")
 
+        # e발주 폴백 조회 (제안요청서 없는 공고만)
+        eorder_files_map: dict[str, list[tuple[str, str]]] = {}
+        for bid_item in open_bids:
+            bid_no = bid_item.get("bidNtceNo", "")
+            if bid_no and not filter_proposal_files(bid_item):
+                files = await fetch_eorder_files(client, bid_no, service_key)
+                if files:
+                    eorder_files_map[bid_no] = files
+
     if not open_bids and not open_prespecs and not prespec_errors:
         return f"📭 No bid notices or preliminary specifications found for keyword: '{keyword}' in the last {days} days."
 
@@ -303,13 +357,18 @@ async def search_bids_by_keyword(keyword: str, service_key: str, prespec_service
 
             proposal_files = filter_proposal_files(item)
             bf_spec_no = item.get("bfSpecRgstNo", "")
+            eorder_files = eorder_files_map.get(bid_no, [])
             prespec_files = []
-            if not proposal_files and bf_spec_no:
+            if not proposal_files and not eorder_files and bf_spec_no:
                 prespec_files = prespec_docs_by_no.get(bf_spec_no, [])
 
             if proposal_files:
                 results.append(f"   📎 제안요청서:\n")
                 for url, filename in proposal_files:
+                    results.append(f"      - {filename}: {url}\n")
+            elif eorder_files:
+                results.append(f"   📎 제안요청서 (e발주):\n")
+                for url, filename in eorder_files:
                     results.append(f"      - {filename}: {url}\n")
             elif prespec_files:
                 results.append(f"   📋 제안요청정보 (사전규격 {bf_spec_no}):\n")
@@ -473,6 +532,15 @@ async def search_bids_for_dept(keyword: str, department_profile: str, service_ke
                         prespec_errors.append(str(e))
                     logger.error(f"Error in dept search (prespecs, chunk {chunk_start}-{chunk_end}): {e}")
 
+        # e발주 폴백 조회 (제안요청서 없는 공고만)
+        eorder_files_map: dict[str, list[tuple[str, str]]] = {}
+        for bid_item in open_bids:
+            bid_no = bid_item.get("bidNtceNo", "")
+            if bid_no and not filter_proposal_files(bid_item):
+                files = await fetch_eorder_files(client, bid_no, service_key)
+                if files:
+                    eorder_files_map[bid_no] = files
+
     if not open_bids and not open_prespecs and not prespec_errors:
         return f"📭 No bid notices or preliminary specifications found for keyword: '{keyword}'"
 
@@ -542,13 +610,18 @@ async def search_bids_for_dept(keyword: str, department_profile: str, service_ke
 
         proposal_files = filter_proposal_files(item)
         bf_spec_no = item.get("bfSpecRgstNo", "")
+        eorder_files = eorder_files_map.get(bid_no, [])
         prespec_files = []
-        if not proposal_files and bf_spec_no:
+        if not proposal_files and not eorder_files and bf_spec_no:
             prespec_files = prespec_docs_by_no.get(bf_spec_no, [])
 
         if proposal_files:
             results.append(f"- 제안요청서:")
             for url, filename in proposal_files:
+                results.append(f"  - {filename}: {url}")
+        elif eorder_files:
+            results.append(f"- 제안요청서 (e발주):")
+            for url, filename in eorder_files:
                 results.append(f"  - {filename}: {url}")
         elif prespec_files:
             results.append(f"- 제안요청정보 (사전규격 {bf_spec_no}):")
