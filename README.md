@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/datajang-narajangteo-mcp-server-badge.png)](https://mseep.ai/app/datajang-narajangteo-mcp-server)
+
 # Nara MCP Server (나라장터 입찰공고 검색)
 
 MCP server for searching Korean government procurement bid notices from G2B (나라장터 - Nara Jangteo).
